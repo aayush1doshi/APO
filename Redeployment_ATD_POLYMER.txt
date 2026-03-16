@@ -1,0 +1,849 @@
+FUNCTION zscm_redep_fetch_pendo.
+*"----------------------------------------------------------------------
+*"*"Local Interface:
+*"  IMPORTING
+*"     VALUE(I_DIV) TYPE  SPART
+*"     VALUE(IT_PRODUCT) TYPE  ZSCM_REDEP_PRODUCT_T OPTIONAL
+*"     VALUE(IT_LOCATION) TYPE  ZSCM_REDEP_LOCATION_T
+*"     VALUE(IT_STR_LOC) TYPE  ZSCM_REDEP_LGORT1_T
+*"     VALUE(IT_BATCH) TYPE  ZSCM_REDEP_CHARG1_T OPTIONAL
+*"     VALUE(I_FROM_DATE) TYPE  SY-DATUM
+*"     VALUE(I_TO_DATE) TYPE  DATS
+*"  EXPORTING
+*"     VALUE(ET_REQUIREMENTS) TYPE  ZBAPI10501SLREQOUT_T
+*"     VALUE(ET_RETURN) TYPE  BAPIRET2_T
+*"----------------------------------------------------------------------
+* Create Date         : 18-01-2023
+* Release             : 6.0
+* Technical Author    : Hiral Thakkar
+* Functional Author   : Prajyot Parab
+*----------------------------------------------------------------------*
+* Description  : Fetch Pendo
+*----------------------------------------------------------------------*
+
+  TYPES: BEGIN OF lty_strgr,
+  value(60) TYPE c,
+  strgr TYPE char2,
+  END OF lty_strgr.
+
+  TYPES: BEGIN OF lty_mtvfp,
+    value(60) TYPE c,
+    mtvfp TYPE mtvfp,
+    END OF lty_mtvfp.
+
+  TYPES: BEGIN OF lty_vbeln,
+    vbeln TYPE vbeln_va,
+    END OF lty_vbeln.
+
+  TYPES: BEGIN OF lty_lifsk,
+     vbeln TYPE vbeln_va,
+     lifsk TYPE lifsk,
+     END OF lty_lifsk.
+
+  DATA: lt_vbeln TYPE TABLE OF lty_vbeln,
+        lt_lifsk TYPE TABLE OF lty_lifsk,
+        lw_lifsk TYPE  lty_lifsk,
+        lw_vbeln TYPE lty_vbeln.
+
+  DATA: lt_return4 TYPE TABLE OF bapiret2.
+
+  CONSTANTS: lc_e TYPE c VALUE 'E',
+             lc_param1 TYPE zparam1 VALUE 'SNP',
+             lc_param2 TYPE zparam2 VALUE 'ZAPO_REDEP',
+             lc_param4 TYPE zparam4 VALUE 'FETCHPAG',
+             lc_param41 TYPE zparam4 VALUE 'FETCHPENDO',
+             lc_param42 TYPE zparam4 VALUE '',
+             lc_param43 TYPE zparam4 VALUE '',
+             lc_param44 TYPE zparam4 VALUE '',
+             lc_strgr(10) TYPE c VALUE 'STRGR',
+             lc_mtvfp(10) TYPE c VALUE 'MTVFP'.
+
+  DATA: lw_return TYPE bapiret2.
+  DATA: lt_return TYPE TABLE OF bapiret2.
+  DATA: lt_return1 TYPE TABLE OF bapiret2.
+
+  DATA: lt_extension_in	TYPE TABLE OF bapiparex,
+        lw_extension_in	TYPE  bapiparex,
+        lt_extension_out TYPE TABLE OF bapiparex.
+
+  DATA: lt_rfc  TYPE TABLE OF zapo_rfc_struct,
+        lw_rfc  TYPE zapo_rfc_struct.
+  DATA: lt_zapoparam TYPE TABLE OF zapoparam,
+        lw_zapoparam TYPE zapoparam.
+
+  DATA: lt_strgr TYPE TABLE OF lty_strgr,
+        lw_strgr TYPE lty_strgr,
+        lt_mtvfp TYPE TABLE OF lty_mtvfp,
+        lw_mtvfp TYPE lty_mtvfp.
+
+  DATA: lr_batch TYPE RANGE OF charg_d,
+        lw_batch1 LIKE LINE OF lr_batch,
+        lr_lgort TYPE RANGE OF lgort_d,
+        lw_lgort LIKE LINE OF lr_lgort.
+
+  TYPES: BEGIN OF lty_matloc,
+    matnr TYPE /sapapo/matnr,
+    werks TYPE /sapapo/locno,
+    END OF lty_matloc.
+
+  DATA: lt_matloc_d TYPE TABLE OF lty_matloc,
+        lw_matloc_d TYPE lty_matloc.
+
+  DATA : lt_matnr TYPE TABLE OF zscm_redep_product_s,"zscm_redep_matnr_s,
+         lw_matnr TYPE zscm_redep_product_s,"zscm_redep_matnr_s,
+         lt_loc TYPE TABLE OF zscm_adb_loc_s,
+         lw_loc TYPE zscm_adb_loc_s.
+
+  DATA: lw_product TYPE zscm_redep_product_s,
+        lw_location TYPE zscm_redep_location_s.
+
+
+  DATA :      gv_monthst_ts   TYPE timestamp,
+              gv_monthed_ts   TYPE timestamp,
+              gv_monthed_date TYPE d,
+              gv_logsys       TYPE logsys.
+
+  DATA: lv_start_time TYPE bapiscmbtstmp,
+        lv_end_time  TYPE  bapiscmbtstmp.
+
+  DATA: lv_dt_from TYPE char120,
+        lv_dt_to TYPE char20.
+
+  DATA: lt_product_selection  TYPE TABLE OF bapiproductrange,
+        lw_product_selection  TYPE  bapiproductrange,
+        lt_location_selection	TYPE TABLE OF	bapilocrange,
+        lw_location_selection TYPE  bapilocrange,
+        lt_atpcat_selection	TYPE TABLE OF	bapiapoatpcat,
+        lw_atpcat_selection	TYPE 	bapiapoatpcat.
+
+  DATA: lt_requirements TYPE TABLE OF bapi10501slreqout.
+  DATA: lw_requirements TYPE  bapi10501slreqout.
+
+  FIELD-SYMBOLS: <lfs_requirements> TYPE bapi10501slreqout.
+
+  DATA: lw_exclude  TYPE  bapi10501selretflags2.
+
+  DATA: lw_batch TYPE zscm_redep_charg1_s,
+        lw_str_loc TYPE zscm_redep_lgort1_s.
+
+  DATA: lt_product TYPE TABLE OF zscm_redep_product_s,
+        lt_location TYPE TABLE OF zscm_redep_location_s.
+
+
+  DATA:  lv_cnt(3) TYPE n,
+         lv_cnt1(3) TYPE n,
+         lv_cnt2(3) TYPE n,
+         lv_cnt3(3) TYPE n.
+
+  DATA: gv_cnt_p TYPE i,
+        gv_cnt_l TYPE i,
+        gv_lines_p TYPE i,
+        gv_lines_l TYPE i,
+        gv_lines TYPE i,
+        gv_cnt TYPE i.
+
+  DATA: lv_index TYPE sy-tabix,
+        lv_no_to TYPE i,
+        lv_no_from TYPE i.
+
+  DATA: lr_matnr TYPE RANGE OF matnr,
+        lw_matnr2 LIKE LINE OF lr_matnr.
+
+  DATA: lr_location TYPE RANGE OF /sapapo/locno,
+        lw_location1 LIKE LINE OF lr_location.
+
+  DATA: gv_flag_p TYPE c,
+        gv_flag_l TYPE c,
+        gv_flag TYPE c.
+
+  "vankudoth rajkumar/prasanth ommanakuttam(boc) 09.09.2024 cd/tr:AD1K917026
+  TYPES: BEGIN OF lty_zapoparam,
+    param1 TYPE	zparam1,
+    param2 TYPE	zparam2,
+    param3 TYPE	zparam3,
+    param4 TYPE	zparam4,
+    param5 TYPE	zparam5,
+    value1 TYPE	zparamvalue1,
+    active_flag	TYPE zactive_flag,
+    END OF lty_zapoparam.
+
+  DATA: lt_zapoparam_rfc TYPE TABLE OF lty_zapoparam,
+        lw_zapoparam_rfc TYPE lty_zapoparam,
+        lv_rfcdest TYPE bdbapidst.
+
+  CONSTANTS: lc_rfc_param1 TYPE zparam1 VALUE 'SNP',
+           lc_rfc_param2 TYPE zparam2 VALUE 'ZAPO_REDEP',
+           lc_rfc_param3 TYPE zparam3 VALUE 'RFC',
+           lc_rfc_active TYPE zactive_flag VALUE 'X'.
+  "vankudoth rajkumar/prasanth ommanakuttam(eoc) 09.09.2024 cd/tr:AD1K917026
+
+
+  IF i_div IS  INITIAL.
+    CLEAR: lw_return.
+    lw_return-type = lc_e.
+    lw_return-message = 'Division is mandatory'(001).
+    APPEND lw_return TO et_return.
+    CLEAR: lw_return.
+    RETURN.
+  ENDIF.
+*boc by madhvi
+*  IF it_product IS  INITIAL.
+*    CLEAR: lw_return.
+*    lw_return-type = lc_e.
+*    lw_return-message = 'Product is mandatory'(002).
+*    APPEND lw_return TO et_return.
+*    CLEAR: lw_return.
+*    RETURN.
+*  ENDIF.
+*eoc by madhvi
+  IF it_location IS  INITIAL.
+    CLEAR: lw_return.
+    lw_return-type = lc_e.
+    lw_return-message = 'Location is mandatory'(003).
+    APPEND lw_return TO et_return.
+    CLEAR: lw_return.
+    RETURN.
+  ENDIF.
+
+
+  IF i_from_date IS  INITIAL.
+    CLEAR: lw_return.
+    lw_return-type = lc_e.
+    lw_return-message = 'From date is mandatory'(004).
+    APPEND lw_return TO et_return.
+    CLEAR: lw_return.
+    RETURN.
+  ENDIF.
+
+  IF i_to_date IS  INITIAL.
+    CLEAR: lw_return.
+    lw_return-type = lc_e.
+    lw_return-message = 'To date is mandatory'(005).
+    APPEND lw_return TO et_return.
+    CLEAR: lw_return.
+    RETURN.
+  ENDIF.
+
+  "vankudoth rajkumar/prasanth ommanakuttam(boc) 09.09.2024 cd/tr:AD1K917026
+  CLEAR lt_zapoparam_rfc[].
+  SELECT param1
+         param2
+         param3
+         param4
+         param5
+         value1
+         active_flag
+          FROM zapoparam CLIENT SPECIFIED
+          INTO TABLE lt_zapoparam_rfc
+          WHERE mandt = sy-mandt
+          AND param1 = lc_rfc_param1
+          AND param2 = lc_rfc_param2
+          AND param3 = lc_rfc_param3
+          AND param4 = sy-sysid
+          AND active_flag = lc_rfc_active.
+  IF sy-subrc = 0.
+    SORT lt_zapoparam_rfc BY param1 param2 param3 param4 param5.
+  ENDIF.
+  "vankudoth rajkumar/prasanth ommanakuttam(eoc) 09.09.2024 cd/tr:AD1K917026
+
+  CALL FUNCTION 'ZAPO_GET_RFC'    "To determine the RFC Destinations
+    EXPORTING
+      iv_system             = 'ECC'
+*     IV_ALL_BSG            = ' '
+    TABLES
+      t_rfc                 = lt_rfc
+    EXCEPTIONS
+      rfc_dest_not_found    = 1
+      invalid_param         = 2
+      no_data_found         = 3
+      own_logical_not_found = 4
+      OTHERS                = 5.
+  IF sy-subrc = 0.
+*    READ TABLE lt_rfc INTO lw_rfc INDEX 1.
+*    IF sy-mandt = '144'.
+*      READ TABLE lt_rfc INTO lw_rfc INDEX 2. "for dev
+*    ENDIF.
+    "vankudoth rajkumar/prasanth ommanakuttam(boc) 09.09.2024 cd/tr:AD1K917026
+    CLEAR lw_zapoparam_rfc.
+    READ TABLE lt_zapoparam_rfc INTO lw_zapoparam_rfc WITH KEY param1 = lc_rfc_param1
+                                                               param2 = lc_rfc_param2
+                                                               param3 = lc_rfc_param3
+                                                               param4 = sy-sysid
+                                                               active_flag = lc_rfc_active.
+    IF sy-subrc = 0.
+      CLEAR lw_rfc.
+      READ TABLE lt_rfc INTO lw_rfc WITH KEY rfcdest = lw_zapoparam_rfc-value1.
+      IF sy-subrc = 0.
+        lv_rfcdest = lw_rfc-rfcdest.
+      ENDIF.
+    ENDIF.
+    "vankudoth rajkumar/prasanth ommanakuttam(eoc) 09.09.2024 cd/tr:AD1K917026
+  ENDIF.
+
+  REFRESH: lt_zapoparam.
+  SELECT *
+  FROM zapoparam
+  INTO TABLE lt_zapoparam
+  WHERE  param1 = lc_param1
+  AND param2 = lc_param2
+  AND param4 IN (lc_param4, lc_param41)
+  AND active_flag = abap_true.
+
+  IF sy-subrc = 0.
+    CLEAR: lw_zapoparam.
+    LOOP AT lt_zapoparam INTO lw_zapoparam WHERE param4 = lc_param4
+                                            AND  param5 = lc_strgr.
+      lw_strgr-strgr = lw_zapoparam-value2.
+      lw_strgr-value = lw_zapoparam-value1.
+      APPEND lw_strgr TO lt_strgr.
+      CLEAR: lw_zapoparam,lw_strgr.
+    ENDLOOP.
+
+    CLEAR: lw_zapoparam.
+    LOOP AT lt_zapoparam INTO lw_zapoparam WHERE param4 = lc_param4
+                                           AND   param5 = lc_mtvfp.
+      lw_mtvfp-mtvfp = lw_zapoparam-value2.
+      lw_mtvfp-value = lw_zapoparam-value1.
+      APPEND lw_mtvfp TO lt_mtvfp.
+      CLEAR: lw_zapoparam,lw_mtvfp.
+    ENDLOOP.
+  ENDIF.
+
+
+  CLEAR: lw_product.
+  LOOP AT it_product INTO lw_product.
+    lw_matnr-matnr = lw_product-matnr.
+    lw_matnr-sign = lw_product-sign.
+    lw_matnr-option = lw_product-option.
+    APPEND lw_matnr TO lt_matnr.
+    CLEAR: lw_matnr.
+
+    CLEAR: lw_matnr2.
+    lw_matnr2-sign = lw_product-sign.
+    lw_matnr2-option = lw_product-option.
+    lw_matnr2-low = lw_product-matnr.
+    APPEND lw_matnr2 TO lr_matnr.
+    CLEAR: lw_matnr2.
+    CLEAR: lw_product.
+  ENDLOOP.
+
+  DELETE lt_matnr WHERE matnr NOT IN lr_matnr.
+
+  CLEAR: lw_loc.
+  LOOP AT it_location INTO lw_location.
+    lw_loc-location = lw_location-location.
+    APPEND lw_loc TO lt_loc.
+    CLEAR: lw_loc.
+
+    lw_location1-sign = lw_location-sign.
+    lw_location1-option = lw_location-option.
+    lw_location1-low = lw_location-location.
+    APPEND lw_location1 TO lr_location.
+
+    CLEAR: lw_location1,lw_location.
+  ENDLOOP.
+
+  DELETE lt_loc WHERE location NOT IN lr_location.
+
+  REFRESH: lt_matloc_d, lt_return.
+  CALL FUNCTION 'Z_SCM_REDEP_FETCH_PAG' DESTINATION lw_rfc-rfcdest  "Read PAG CVC and Quantity
+    EXPORTING
+      i_div     = i_div
+      it_matnr  = lt_matnr
+      it_locno  = lt_loc
+      it_strgr  = lt_strgr
+      it_mtvpf  = lt_mtvfp
+    IMPORTING
+      et_matloc = lt_matloc_d
+      et_return = lt_return.
+
+  IF lt_matloc_d IS NOT INITIAL.
+
+    DESCRIBE TABLE lt_matloc_d LINES gv_lines.
+    IF gv_lines GT 98.
+      gv_cnt = gv_lines / 50.
+      gv_cnt = gv_cnt + 1.
+      gv_flag = abap_true.
+    ENDIF.
+
+    CLEAR : gv_logsys.
+*** logical system
+    CALL FUNCTION '/SAPAPO/GET_OWN_LOGSYS'                        " Determine the Separate Logical System
+      IMPORTING
+        ev_ownlogsys = gv_logsys.
+
+    CLEAR: lv_end_time, lv_start_time,lv_dt_from, lv_dt_to.
+    lv_dt_from = i_from_date.
+    lv_dt_to = i_to_date.
+    CONCATENATE lv_dt_from '000000' INTO lv_dt_from.
+    CONCATENATE lv_dt_to '235959' INTO lv_dt_to.
+
+    lv_start_time = lv_dt_from.
+    lv_end_time = lv_dt_to.
+
+    IF gv_flag = abap_false.
+
+      CLEAR: lw_matloc_d.
+      LOOP AT lt_matloc_d INTO lw_matloc_d .
+        lw_product_selection-sign = 'I'.
+        lw_product_selection-option = 'EQ'.
+        lw_product_selection-low = lw_matloc_d-matnr.
+        APPEND lw_product_selection TO lt_product_selection.
+        CLEAR: lw_product_selection.
+
+        lw_location_selection-sign = 'I'.
+        lw_location_selection-option = 'EQ'.
+        lw_location_selection-low = lw_matloc_d-werks.
+        APPEND lw_location_selection TO lt_location_selection.
+        CLEAR: lw_location_selection.
+        CLEAR: lw_matloc_d.
+      ENDLOOP.
+
+
+
+      CLEAR: lw_zapoparam.
+      LOOP AT lt_zapoparam INTO lw_zapoparam WHERE param4 = lc_param41.
+        lw_atpcat_selection-atpcat = lw_zapoparam-value1.
+        APPEND lw_atpcat_selection TO lt_atpcat_selection.
+        CLEAR: lw_atpcat_selection.
+        CLEAR: lw_zapoparam.
+      ENDLOOP.
+
+      CLEAR: lw_exclude.
+      lw_exclude-no_complete_order_reading = abap_true.
+
+      CLEAR lv_cnt1.
+      DESCRIBE TABLE lt_product_selection LINES lv_cnt1.
+
+
+      CLEAR lv_cnt2.
+      DESCRIBE TABLE lt_location_selection LINES lv_cnt2.
+
+
+      CLEAR lv_cnt3.
+      DESCRIBE TABLE lt_atpcat_selection LINES lv_cnt3.
+
+      lv_cnt = lv_cnt1 + lv_cnt2 + lv_cnt3.
+
+
+      CLEAR: lw_extension_in.
+      lw_extension_in-structure = 'MAX_RANGE_ENTRIES'.
+      lw_extension_in-valuepart1 = lv_cnt."lv_cnt_f.
+      APPEND lw_extension_in TO lt_extension_in.
+      CLEAR: lw_extension_in.
+
+      lw_exclude-no_peg_input_flag =
+      lw_exclude-no_charact_req_input_flag =
+      lw_exclude-no_documents_flag =
+      lw_exclude-no_receipts_flag =
+      lw_exclude-no_peg_output_flag =
+      lw_exclude-no_cfg_headers =
+      lw_exclude-no_cfg_instances =
+      lw_exclude-no_cfg_part_of =
+      lw_exclude-no_cfg_values =
+      lw_exclude-no_cfg_var_keys =
+      lw_exclude-no_cfg_blob =
+      lw_exclude-no_complete_order_reading = abap_true.
+
+      REFRESH: lt_requirements.
+      CALL FUNCTION 'BAPI_SLSRVAPS_GETLIST2'
+        EXPORTING
+          logical_system              = gv_logsys
+          start_time                  = lv_start_time
+          end_time                    = lv_end_time
+         exclude_export_flags        = lw_exclude
+*     MAX_NUMBER_OF_ORDERS        =
+*     TRANSFER_MODE               =
+          plng_version                = '000'
+          io_node_selection           = 'I'
+*   IMPORTING
+*     NUMBER_OF_ORDERS            =
+       TABLES
+          product_selection           = lt_product_selection
+          location_selection          = lt_location_selection
+*     LOCTYPE_SELECTION           =
+*     PRODUCT_LOCATION_KEYS       =
+*     ORDER_SELECTION             =
+*     ORDERTYPE_SELECTION         =
+*     ORDER_GUIDS                 =
+*     ORDER_KEYS                  =
+          atpcat_selection            = lt_atpcat_selection
+*     CUSTOMER_SELECTION          =
+*     CFG_SELECTION               =
+          requirements                = lt_requirements
+*     RECEIPTS                    =
+*     PEGGING_INPUT_NODES         =
+*     PEGGING_OUTPUT_NODES        =
+*     CFG_HEADERS                 =
+*     CFG_INSTANCES               =
+*     CFG_PART_OF                 =
+*     CFG_VALUES                  =
+*     CFG_VAR_KEYS                =
+*     CFG_BLOB                    =
+         return                      = lt_return1
+         extension_in                = lt_extension_in
+         extension_out               = lt_extension_out
+                .
+
+
+
+      IF lt_return1 IS NOT INITIAL.
+
+        CLEAR: lw_return.
+        LOOP AT lt_return1 INTO lw_return .
+          APPEND lw_return TO et_return.
+          CLEAR: lw_return.
+        ENDLOOP.
+      ENDIF.
+
+      IF lt_requirements IS NOT INITIAL.
+
+        IF it_str_loc IS NOT INITIAL.
+          CLEAR: lw_str_loc.
+          LOOP AT it_str_loc INTO lw_str_loc.
+            CLEAR: lw_lgort.
+            lw_lgort-sign = lw_str_loc-sign.
+            lw_lgort-option = lw_str_loc-option.
+            lw_lgort-low = lw_str_loc-lgort.
+            APPEND lw_lgort TO lr_lgort.
+            CLEAR: lw_str_loc,lw_lgort.
+          ENDLOOP.
+
+          DELETE lt_requirements WHERE storage_location NOT IN lr_lgort.
+        ENDIF.
+
+
+
+        IF it_batch IS NOT INITIAL.
+          CLEAR: lw_batch.
+          LOOP AT it_batch INTO lw_batch.
+            CLEAR: lw_batch1.
+            lw_batch1-sign = lw_batch-sign.
+            lw_batch1-option = lw_batch-option.
+            lw_batch1-low = lw_batch-charg.
+            APPEND lw_batch1 TO lr_batch.
+            CLEAR: lw_batch,lw_batch1.
+          ENDLOOP.
+
+          DELETE lt_requirements WHERE batch NOT IN lr_batch.
+        ENDIF.
+
+      ENDIF.
+
+
+
+      APPEND LINES OF lt_requirements TO et_requirements.
+
+    ELSE.
+
+      DO gv_cnt TIMES.
+        lv_index = sy-tabix.
+        CASE lv_index.
+          WHEN '1'.
+            lv_no_from = 1.
+            lv_no_to = 48.
+          WHEN OTHERS.
+            lv_no_from = lv_no_to + 1.
+            lv_no_to = lv_no_from + 47.
+        ENDCASE.
+
+        CLEAR: lw_matloc_d.
+        REFRESH: lt_product_selection,lt_location_selection,lt_atpcat_selection.
+        LOOP AT lt_matloc_d INTO lw_matloc_d FROM lv_no_from TO lv_no_to .
+          lw_product_selection-sign = 'I'.
+          lw_product_selection-option = 'EQ'.
+          lw_product_selection-low = lw_matloc_d-matnr.
+          APPEND lw_product_selection TO lt_product_selection.
+          CLEAR: lw_product_selection.
+
+          lw_location_selection-sign = 'I'.
+          lw_location_selection-option = 'EQ'.
+          lw_location_selection-low = lw_matloc_d-werks.
+          APPEND lw_location_selection TO lt_location_selection.
+          CLEAR: lw_location_selection.
+          CLEAR: lw_matloc_d.
+        ENDLOOP.
+
+        CLEAR: lw_zapoparam.
+        LOOP AT lt_zapoparam INTO lw_zapoparam WHERE param4 = lc_param41.
+          lw_atpcat_selection-atpcat = lw_zapoparam-value1.
+          APPEND lw_atpcat_selection TO lt_atpcat_selection.
+          CLEAR: lw_atpcat_selection.
+          CLEAR: lw_zapoparam.
+        ENDLOOP.
+
+        CLEAR: lw_exclude.
+        lw_exclude-no_complete_order_reading = abap_true.
+
+        CLEAR lv_cnt1.
+        DESCRIBE TABLE lt_product_selection LINES lv_cnt1.
+
+
+        CLEAR lv_cnt2.
+        DESCRIBE TABLE lt_location_selection LINES lv_cnt2.
+
+
+        CLEAR lv_cnt3.
+        DESCRIBE TABLE lt_atpcat_selection LINES lv_cnt3.
+
+        lv_cnt = lv_cnt1 + lv_cnt2 + lv_cnt3.
+
+
+        CLEAR: lw_extension_in.
+        lw_extension_in-structure = 'MAX_RANGE_ENTRIES'.
+        lw_extension_in-valuepart1 = lv_cnt."lv_cnt_f.
+        APPEND lw_extension_in TO lt_extension_in.
+        CLEAR: lw_extension_in.
+
+        lw_exclude-no_peg_input_flag =
+        lw_exclude-no_charact_req_input_flag =
+        lw_exclude-no_documents_flag =
+        lw_exclude-no_receipts_flag =
+        lw_exclude-no_peg_output_flag =
+        lw_exclude-no_cfg_headers =
+        lw_exclude-no_cfg_instances =
+        lw_exclude-no_cfg_part_of =
+        lw_exclude-no_cfg_values =
+        lw_exclude-no_cfg_var_keys =
+        lw_exclude-no_cfg_blob =
+        lw_exclude-no_complete_order_reading = abap_true.
+
+        REFRESH: lt_requirements.
+        CALL FUNCTION 'BAPI_SLSRVAPS_GETLIST2'
+          EXPORTING
+            logical_system              = gv_logsys
+            start_time                  = lv_start_time
+            end_time                    = lv_end_time
+           exclude_export_flags        = lw_exclude
+*     MAX_NUMBER_OF_ORDERS        =
+*     TRANSFER_MODE               =
+            plng_version                = '000'
+            io_node_selection           = 'I'
+*   IMPORTING
+*     NUMBER_OF_ORDERS            =
+         TABLES
+            product_selection           = lt_product_selection
+            location_selection          = lt_location_selection
+*     LOCTYPE_SELECTION           =
+*     PRODUCT_LOCATION_KEYS       =
+*     ORDER_SELECTION             =
+*     ORDERTYPE_SELECTION         =
+*     ORDER_GUIDS                 =
+*     ORDER_KEYS                  =
+            atpcat_selection            = lt_atpcat_selection
+*     CUSTOMER_SELECTION          =
+*     CFG_SELECTION               =
+            requirements                = lt_requirements
+*     RECEIPTS                    =
+*     PEGGING_INPUT_NODES         =
+*     PEGGING_OUTPUT_NODES        =
+*     CFG_HEADERS                 =
+*     CFG_INSTANCES               =
+*     CFG_PART_OF                 =
+*     CFG_VALUES                  =
+*     CFG_VAR_KEYS                =
+*     CFG_BLOB                    =
+           return                      = lt_return1
+           extension_in                = lt_extension_in
+           extension_out               = lt_extension_out
+                  .
+
+
+
+        IF lt_return1 IS NOT INITIAL.
+
+          CLEAR: lw_return.
+          LOOP AT lt_return1 INTO lw_return .
+            APPEND lw_return TO et_return.
+            CLEAR: lw_return.
+          ENDLOOP.
+        ENDIF.
+
+        IF lt_requirements IS NOT INITIAL.
+
+          IF it_str_loc IS NOT INITIAL.
+            CLEAR: lw_str_loc.
+            LOOP AT it_str_loc INTO lw_str_loc.
+              CLEAR: lw_lgort.
+              lw_lgort-sign = lw_str_loc-sign.
+              lw_lgort-option = lw_str_loc-option.
+              lw_lgort-low = lw_str_loc-lgort.
+              APPEND lw_lgort TO lr_lgort.
+              CLEAR: lw_str_loc,lw_lgort.
+            ENDLOOP.
+
+            DELETE lt_requirements WHERE storage_location NOT IN lr_lgort.
+          ENDIF.
+
+
+
+          IF it_batch IS NOT INITIAL.
+            CLEAR: lw_batch.
+            LOOP AT it_batch INTO lw_batch.
+              CLEAR: lw_batch1.
+              lw_batch1-sign = lw_batch-sign.
+              lw_batch1-option = lw_batch-option.
+              lw_batch1-low = lw_batch-charg.
+              APPEND lw_batch1 TO lr_batch.
+              CLEAR: lw_batch,lw_batch1.
+            ENDLOOP.
+
+            DELETE lt_requirements WHERE batch NOT IN lr_batch.
+          ENDIF.
+
+        ENDIF.
+
+
+
+
+
+        APPEND LINES OF lt_requirements TO et_requirements.
+
+      ENDDO.
+
+    ENDIF.
+
+    IF et_requirements IS NOT INITIAL.
+      CLEAR: lw_requirements.
+      LOOP AT et_requirements INTO lw_requirements.
+        lw_vbeln-vbeln = lw_requirements-order_number.
+        APPEND lw_vbeln TO lt_vbeln.
+        CLEAR: lw_vbeln.
+        CLEAR: lw_requirements.
+      ENDLOOP.
+
+      REFRESH: lt_lifsk, lt_return4.
+      CALL FUNCTION 'Z_SCM_REDEP_FETCH_SO_PENDO' DESTINATION lw_rfc-rfcdest
+        EXPORTING
+          it_vbeln  = lt_vbeln
+        IMPORTING
+          et_so_det = lt_lifsk
+          et_return = lt_return4.
+
+*      IF lt_lifsk IS NOT INITIAL.                 "Commented By Trilok-  AD1K916632
+      LOOP AT et_requirements ASSIGNING <lfs_requirements>.
+        IF <lfs_requirements> IS ASSIGNED.
+          CHECK <lfs_requirements>-atpcat = 'BM'.
+
+          CLEAR: lw_lifsk.
+          READ TABLE lt_lifsk INTO lw_lifsk WITH KEY vbeln = <lfs_requirements>-order_number.
+          IF sy-subrc <> 0.
+*              IF lw_lifsk-lifsk IS NOT INITIAL.
+            <lfs_requirements>-order_number =  ' '.
+*              ENDIF.
+          ENDIF.
+        ENDIF.
+      ENDLOOP.
+*      ENDIF.
+
+      DELETE et_requirements WHERE order_number IS INITIAL.
+
+      REFRESH: lt_zapoparam.
+      SELECT param1
+            param2
+            param3
+            param4
+            param5
+            value1
+            value2
+            value3
+            value4
+            value5
+            active_flag
+       FROM zapoparam
+       INTO TABLE lt_zapoparam
+       WHERE param1 = lc_param1
+       AND param2 = lc_param2
+       AND param3 = i_div
+       AND param4 IN (lc_param4,lc_param42,lc_param43,lc_param44)
+       AND active_flag = abap_true.
+
+      READ TABLE lt_zapoparam INTO lw_zapoparam WITH KEY param3 = i_div
+                                                          value1 = 'BATCH'.
+
+      IF sy-subrc <> 0.
+        LOOP AT et_requirements ASSIGNING <lfs_requirements>.
+          IF <lfs_requirements> IS ASSIGNED.
+            CLEAR: <lfs_requirements>-batch.
+          ENDIF.
+        ENDLOOP.
+      ENDIF.
+
+    ENDIF.
+*  ENDIF.
+*
+*    CLEAR: lw_product.
+*    LOOP AT it_product INTO lw_product.
+*      CLEAR: lw_matloc_d.
+*      READ TABLE lt_matloc_d INTO lw_matloc_d WITH KEY matnr = lw_product-matnr.
+*      IF sy-subrc = 0.
+*        APPEND lw_product TO lt_product.
+*      ENDIF.
+*      CLEAR: lw_product.
+*    ENDLOOP.
+*
+*
+*    CLEAR: lw_location.
+*    LOOP AT it_location INTO lw_location.
+*      CLEAR: lw_matloc_d.
+*      READ TABLE lt_matloc_d INTO lw_matloc_d WITH KEY werks = lw_location-location.
+*      IF sy-subrc = 0.
+*        APPEND lw_location TO lt_location.
+*      ENDIF.
+*      CLEAR: lw_location.
+*    ENDLOOP.
+
+*ENDIF.
+
+
+
+
+
+*
+*  IF gv_cnt_p LE 48.
+*    CLEAR: lw_product_selection,lw_product.
+*    LOOP AT lt_product INTO lw_product.
+*      lw_product_selection-sign = lw_product-sign.
+*      lw_product_selection-option = lw_product-option.
+*      lw_product_selection-low = lw_product-matnr.
+*      APPEND lw_product_selection TO lt_product_selection.
+*      CLEAR: lw_product_selection.
+*      CLEAR: lw_product.
+*    ENDLOOP.
+*  ELSE.
+*    gv_flag_p = abap_true.
+*  ENDIF.
+*
+*
+*
+*  IF gv_cnt_l LE 48.
+*    CLEAR: lw_location_selection,lw_location.
+*    LOOP AT lt_location INTO lw_location.
+*      lw_location_selection-sign = lw_location-sign.
+*      lw_location_selection-option = lw_location-option.
+*      lw_location_selection-low = lw_location-location.
+*      APPEND lw_location_selection TO lt_location_selection.
+*      CLEAR: lw_location_selection.
+*      CLEAR: lw_location.
+*    ENDLOOP.
+*  ELSE.
+*    gv_flag_l = abap_true.
+*  ENDIF.
+*
+*  IF gv_flag_l NE abap_true AND gv_flag_p NE abap_true.
+
+
+*else.
+*  if gv_flag_l = abap_true and gv_flag_p ne abap_true.
+*
+*
+*
+*
+  ENDIF.
+
+
+
+
+
+
+ENDFUNCTION.
