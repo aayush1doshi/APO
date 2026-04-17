@@ -1,0 +1,4759 @@
+*&---------------------------------------------------------------------*
+*&  Include           ZAPO_DP_EXCEPT_CLS
+*&---------------------------------------------------------------------*
+
+*----------------------------------------------------------------------*
+*       CLASS lcl_realign DEFINITION
+*----------------------------------------------------------------------*
+*
+*----------------------------------------------------------------------*
+CLASS lcl_realign DEFINITION FINAL.
+  PUBLIC SECTION.
+    METHODS:
+      constructor,
+      fcode,
+      sos,
+      validate_input,
+      list_of_inputs. "added by madhvi jain
+  PRIVATE SECTION.
+    DATA:
+      gr_div TYPE RANGE OF /bic/oip_div,
+      gw_div LIKE LINE OF gr_div,
+      go_plob TYPE REF TO /sapapo/cl_scmb_pstru_plob,
+      gt_selection TYPE /sapapo/ts_iobj_selection_tab,
+      gs_read_opt TYPE /sapapo/cl_scmb_pstru_plob=>ty_s_get_plobs_read_option,
+      gt_sel_div TYPE /sapapo/ts_iobj_selection_tab,
+      gt_grpby TYPE /sapapo/ts_group_by_tab,
+      gt_vis_col TYPE /sapapo/ts_group_by_tab,
+      gt_plob_values TYPE /sapapo/ts_plob_values_tab,
+      gv_rule_name TYPE char20,
+*      boc by madhvi
+      gt_selection_bapi TYPE TABLE OF bapi10030pbselection,
+      gt_group_by TYPE TABLE OF bapi10030pbgroupby,
+      gt_key_figure_selection TYPE TABLE OF bapi10030keyfigure,
+       gw_key_figure_selection TYPE  bapi10030keyfigure, "added by madhvi
+      gt_key_figure_value TYPE TABLE OF bapi10030pbtimeseriesitem2o,
+      gt_key_figure TYPE TABLE OF bapi10030pbtimeseries2o,
+      gt_number_of_char_combs TYPE TABLE OF bapi10030genfields-no_of_char_combs,
+      gw_char_comb TYPE apo_bapi_numberofobjects,
+      gt_characteristics_combination TYPE TABLE OF bapi10030pbcharcomb2o,
+      gt_return TYPE TABLE OF bapiret2,
+      gw_return          TYPE bapiret2,
+      lt_return         TYPE bapiret2_tab.
+
+*    boc by madhvi
+
+    DATA : lt_planning TYPE TABLE OF bapi10030genfields-planning_book,
+            ls_planning TYPE bapi10030genfields-planning_book.
+
+    DATA : lt_view TYPE TABLE OF bapi10030genfields-data_view,
+          ls_view TYPE bapi10030genfields-data_view.
+
+    DATA: lt_read_options TYPE TABLE OF bapi10030pbreadoptions2,
+          ls_read_options TYPE  bapi10030pbreadoptions2.
+
+    DATA: lt_key_figure_selection TYPE TABLE OF bapi10030keyfigure ,
+          ls_key_figure_selection TYPE bapi10030keyfigure.
+
+    DATA: lt_date_from TYPE bapi10030periodfrom,
+      ls_date_to TYPE bapi10030periodto,
+      lv_dat_f TYPE /sapapo/cdps_eval_date_from,
+      lv_dat_t TYPE /sapapo/cdps_eval_date_to.
+
+*eoc by madhvi
+    METHODS:
+      append_selfield
+        IMPORTING
+          iv_fname TYPE /sapapo/iobjnm,
+          append_selfield_bapi
+        IMPORTING
+          iv_fname TYPE /sapapo/iobjnm,
+      compare_cvc,
+      display_proposed_cvc,
+      display_valid_grpcust,
+*        IMPORTING
+*          iv_popup TYPE char1 OPTIONAL,
+      fetch_cvc,
+      fetch_param,
+      fetch_realign_data,
+      get_auth
+        IMPORTING
+          iv_auth_object TYPE xuobject,
+      init_bg,
+      init_module,
+      append_log
+        IMPORTING
+          iv_status TYPE char20
+          iv_err_desc TYPE string OPTIONAL,
+      populate_info_obj
+        IMPORTING
+          iv_fieldname TYPE /sapapo/iobjnm
+          iv_val_frm TYPE /sapapo/chavl
+          iv_val_to TYPE /sapapo/chavl,
+      post_realign_data,
+      realign,
+      show_progressbar
+        IMPORTING
+          iv_text TYPE char50
+          iv_prc  TYPE i,
+      send_mail,
+      upd_ibp_status
+        IMPORTING
+          iv_stat TYPE char1
+          iv_rule TYPE char30 OPTIONAL,
+      on_user_command FOR EVENT added_function OF cl_salv_events
+        IMPORTING e_salv_function,
+          execution.
+ENDCLASS.                    "lcl_expt_rlgn DEFINITION
+
+*----------------------------------------------------------------------*
+*       CLASS lcl_expt_rlgn IMPLEMENTATION
+*----------------------------------------------------------------------*
+*
+*----------------------------------------------------------------------*
+CLASS lcl_realign IMPLEMENTATION.
+
+  "! The constructor  initializes the P_MOD & P_BSGGRP dropdown with
+  "! initial values.
+  METHOD constructor.
+    CREATE OBJECT go_plob.
+    me->fetch_param( ).
+    me->init_module( ).
+    me->init_bg( ).
+*    fetching the selection screen radio button auth details
+    me->get_auth( iv_auth_object = 'ZRDSEL_EX' ).
+  ENDMETHOD.                    "constructor
+
+  "! This method read the User Command and gives output according to
+  "! the given command.
+  METHOD fcode.
+    DATA:
+      lv_name TYPE tdobname,
+      lt_lines TYPE TABLE OF tline,
+      lv_dir TYPE string,
+      lv_xstr_pdf TYPE xstring.
+
+    FIELD-SYMBOLS:
+*      <lfs_field> TYPE any,
+      <lfs_line> TYPE tline,
+      <lfs_zapoparam> TYPE zapoparam.
+
+
+    CASE sy-ucomm.
+      WHEN gc_ucomm_fc01.
+        UNASSIGN <lfs_zapoparam>.
+        READ TABLE gt_zapoparam ASSIGNING <lfs_zapoparam>
+          WITH KEY
+            param3 = gc_param3_sop
+            active_flag =  abap_true.
+        IF sy-subrc = 0.
+          lv_name =  <lfs_zapoparam>-value1.
+        ELSE.
+          MESSAGE 'Please Maintain Directory Text Name of SOP Document'(001) TYPE gc_e.
+        ENDIF.
+        CALL FUNCTION 'READ_TEXT'
+          EXPORTING
+            client                  = sy-mandt
+            id                      = gc_tdid_st
+            language                = sy-langu
+            name                    = lv_name
+            object                  = gc_tdobject_text
+          TABLES
+            lines                   = lt_lines
+          EXCEPTIONS
+            id                      = 1
+            language                = 2
+            name                    = 3
+            not_found               = 4
+            object                  = 5
+            reference_check         = 6
+            wrong_access_to_archive = 7
+            OTHERS                  = 8.
+        IF sy-subrc = 0.
+          UNASSIGN <lfs_line>.
+          READ TABLE lt_lines ASSIGNING <lfs_line> INDEX 1.
+          IF sy-subrc = 0 AND <lfs_line> IS ASSIGNED.
+            CONCATENATE <lfs_line>-tdline gc_pdf_docname INTO lv_dir.
+            OPEN DATASET lv_dir FOR INPUT IN BINARY MODE.
+            IF sy-subrc = 0.
+              READ DATASET lv_dir INTO lv_xstr_pdf.
+              CLOSE DATASET lv_dir.
+              gt_data_pdf = cl_bcs_convert=>xstring_to_solix( iv_xstring = lv_xstr_pdf ).
+              CALL SCREEN 9001.
+            ELSE.
+              MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
+                WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+            ENDIF.
+          ENDIF.
+        ELSE.
+          MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
+            WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+        ENDIF.
+    ENDCASE.
+  ENDMETHOD.                    "fcode
+
+  "! This method will be called in Start of Selectin event or Report.
+  METHOD sos.
+
+    DATA:
+      lt_split_div TYPE STANDARD TABLE OF char10.
+
+    FIELD-SYMBOLS:
+      <lfs_zapoparam> TYPE zapoparam,
+      <lfs_rulelog> TYPE gty_rulelog,
+      <lfs_split_row> TYPE char10,
+      <lfs_sel> TYPE /sapapo/ts_iobj_selection.
+
+*    fetching data for comparision with existing CVC
+    me->fetch_realign_data( ).
+
+    gt_zapoparam_rule = gt_zapoparam.
+
+*    deleting the inactive rules except the selected business group.
+    DELETE gt_zapoparam_rule WHERE param4 <> gc_param4_rule OR param3 <> p_bsggrp OR active_flag = abap_false.
+*      boc by madhvi jain on 06.03.2024
+    IF gr_value1[] IS NOT INITIAL.
+      DELETE gt_zapoparam_rule WHERE value1 NOT IN gr_value1.
+      IF gr_value2[] IS NOT INITIAL.
+        DELETE gt_zapoparam_rule WHERE value2 NOT IN gr_value2.
+      ENDIF.
+    ELSE.
+      DELETE gt_zapoparam_rule WHERE value1 = 'SALES_HISTORY'.
+    ENDIF.
+
+
+* eoc by madhvi jain
+    SORT gt_zapoparam_rule BY param5.
+
+*    executing each rule
+    CLEAR: gv_flg_err, gv_flg_norlgn.
+*    break abap_team.
+*    DELETE gt_zapoparam_rule FROM 2.
+    CLEAR: lv_flag.
+    LOOP AT gt_zapoparam_rule ASSIGNING <lfs_zapoparam>.
+      CONCATENATE <lfs_zapoparam>-value1 <lfs_zapoparam>-value2 INTO me->gv_rule_name SEPARATED BY gc_sprtr.
+
+*    assigning the default Division to be selected on the basis of business group
+      gt_selection = gt_sel_div.
+
+      IF <lfs_zapoparam>-value3 IS NOT INITIAL.
+        CLEAR lt_split_div.
+        SPLIT <lfs_zapoparam>-value3 AT gc_comma INTO TABLE lt_split_div.
+        LOOP AT lt_split_div ASSIGNING <lfs_split_row>.
+          READ TABLE gt_selection ASSIGNING <lfs_sel>
+            WITH KEY
+              iobjnm = gc_fn_p_div
+              low = <lfs_split_row>.
+          IF sy-subrc = 0 AND <lfs_sel> IS ASSIGNED.
+            DELETE gt_selection INDEX sy-tabix.
+          ENDIF.
+        ENDLOOP.
+      ENDIF.
+
+      me->fetch_cvc( ).
+      me->compare_cvc( ).
+      <lfs_zapoparam>-active_flag = abap_false.
+      CASE abap_true.
+        WHEN p_exec.
+          IF gv_flg_err = abap_true.
+            EXIT.
+          ENDIF.
+*          IF <lfs_zapoparam>-value2 NE 'AAG_MATDEL' AND <lfs_zapoparam>-value2 NE 'AAG_CSTBLCK' AND <lfs_zapoparam>-value2 NE 'AAG_PYBLPT'. "Added Vandan 16.02.2022
+          me->realign( ).
+*          ENDIF.
+          IF gv_flg_err = abap_true.
+            EXIT.
+          ENDIF.
+      ENDCASE.
+    ENDLOOP.
+
+
+
+
+    CASE abap_true.
+      WHEN p_rprt.
+        IF gt_inv_customers IS NOT INITIAL.
+          SORT gt_inv_customers.
+          DELETE ADJACENT DUPLICATES FROM gt_inv_customers COMPARING ALL FIELDS.
+          SORT gt_inv_customers BY shipto saleorg dc div.
+        ENDIF.
+*        displaying the proposed value
+*        me->display_valid_grpcust( ).
+        me->display_proposed_cvc( ).
+      WHEN p_exec.
+        IF gv_flg_err = abap_false.
+          IF gt_final IS NOT INITIAL.
+            me->execution( ).
+            IF gv_flg_err = abap_true.
+              RETURN.
+            ELSE.
+              COMMIT WORK.
+            ENDIF.
+            me->realign( ).
+          ENDIF.
+*          updading the status table
+          me->upd_ibp_status( iv_stat = abap_true ).
+        ELSE.
+          me->send_mail( ).
+          READ TABLE gt_rulelog ASSIGNING <lfs_rulelog> WITH KEY stat = gc_stat_err.
+          IF sy-subrc = 0.
+            me->upd_ibp_status(
+              EXPORTING
+                iv_stat = abap_false
+                iv_rule = <lfs_rulelog>-rule
+            ).
+          ENDIF.
+        ENDIF.
+        me->display_valid_grpcust( ).
+    ENDCASE.
+  ENDMETHOD.                    "sos
+
+  "! This method Validates the selected value in P_BSGGRP.
+  METHOD  validate_input.
+    DATA:
+      lt_rlgn_stat TYPE TABLE OF /sapapo/ts_rlg_step.
+
+    CONSTANTS: lc_zapo_cvcrealign TYPE zparam2 VALUE 'ZAPO_CVCREALIGN'. " added by omkar more on 11.09.2025 CD:8085179 TR:AD1K917372
+
+    FIELD-SYMBOLS:
+      <lfs_zapoparam> TYPE zapoparam.
+    IF sy-ucomm = gc_ucomm_fc01.
+      RETURN.
+    ENDIF.
+    IF p_bsggrp IS INITIAL.
+*       CHECK sy-ucomm = 'ONLI'.
+      MESSAGE 'Please select a Business Group'(017) TYPE gc_e.
+    ELSE.
+      READ TABLE gt_zapoparam ASSIGNING <lfs_zapoparam> WITH KEY mandt       = sy-mandt           " added by omkar more on 11.09.2025 CD:8085179 TR:AD1K917372
+                                                                 param1      = p_mod              " added by omkar more on 11.09.2025 CD:8085179 TR:AD1K917372
+                                                                 param2      = lc_zapo_cvcrealign " added by omkar more on 11.09.2025 CD:8085179 TR:AD1K917372
+                                                                 param3      = gc_param3_mpos
+                                                                 param4      = p_bsggrp
+                                                                 active_flag = abap_true. " No binary search required param table less records
+      IF sy-subrc = 0.
+        gv_plobid = <lfs_zapoparam>-value1.
+*      checking validity of Planning object & getting the characteristic value
+*      of selected planning object
+        CALL FUNCTION '/SAPAPO/TS_RLG_TABLE_GET'
+          EXPORTING
+            iv_bas_plobid         = gv_plobid
+          IMPORTING
+            et_chars              = gt_chars
+            ev_tablename          = gv_tabname
+          EXCEPTIONS
+            not_found             = 1
+            plobid_invalid        = 2
+            infoprov_invalid      = 3
+            found_but_not_created = 4
+            interface_error       = 5
+            OTHERS                = 6.
+        IF sy-subrc = 0.
+*          checking wheather there the realignment for any previous data is pending
+          SELECT step_id
+            FROM (gv_tabname)
+            INTO TABLE lt_rlgn_stat
+            WHERE state = abap_false.
+          IF sy-subrc = 0.
+            MESSAGE 'Cannot Realign: Previous Realignment Steps are pending '(002) TYPE gc_e.
+          ENDIF.
+        ELSE.
+          MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
+             WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+        ENDIF.
+      ENDIF.
+    ENDIF.
+
+*    deleting the rules of other selected module
+    DELETE gt_zapoparam WHERE param1 <> p_mod.
+  ENDMETHOD.                     "validate_input
+
+  "! An utility method to add log to the GT_RULELOG internal table.
+  "! @parameter iv_status           | status of log record
+  METHOD append_log.
+    FIELD-SYMBOLS:
+      <lfs_rulelog> TYPE gty_rulelog.
+    APPEND INITIAL LINE TO gt_rulelog ASSIGNING <lfs_rulelog>.
+    IF <lfs_rulelog> IS ASSIGNED.
+      <lfs_rulelog>-rule     = me->gv_rule_name.
+      <lfs_rulelog>-stat     = iv_status.
+      <lfs_rulelog>-err_desc = iv_err_desc.
+    ENDIF.
+  ENDMETHOD.                    "append_log
+
+  "! An utlity method to add the field to the GT_GRPBY internal
+  "! table.
+  "! @parameter iv_fname            | Field to be added
+  METHOD append_selfield.
+    READ TABLE gt_chars WITH KEY table_line = iv_fname TRANSPORTING NO FIELDS.
+    IF sy-subrc = 0.
+      APPEND iv_fname TO gt_grpby.
+    ENDIF.
+  ENDMETHOD.                    "append_selfield
+*boc by madhvi
+  METHOD append_selfield_bapi.
+    READ TABLE gt_chars WITH KEY table_line = iv_fname TRANSPORTING NO FIELDS.
+    IF sy-subrc = 0.
+      APPEND iv_fname TO lt_combined. "gt_group_by.
+    ENDIF.
+  ENDMETHOD.                    "append_selfield_bapi
+  "commented by madhvi
+*  eoc by madhvi
+
+  "! This method compares each CVC record according to the given rule with the
+  "! predefined field and updates the CVC Record.
+  METHOD compare_cvc.
+    FIELD-SYMBOLS:
+      <lfs_excus> TYPE gty_excus,
+      <lfs_cuscls> TYPE gty_cuscls,
+      <lfs_matcls> TYPE gty_matcls,
+      <lfs_tercust> TYPE gty_tercust,
+      <lfs_knvp> TYPE gty_knvp,
+      <lfs_knvp2> TYPE  gty_knvp,
+      <lfs_loc> TYPE gty_location,
+      <lfs_cust> TYPE gty_cust,
+      <lfs_matkey> TYPE gty_matkey,
+      <lfs_zapoparam> TYPE zapoparam,
+      <lfs_cust_seg> TYPE gty_cust_seg,
+      <lfs_fin> TYPE gty_final,
+      <lfs_field> TYPE any,
+      <lfs_field1> TYPE any,
+      <lfs_cust_a> TYPE gty_customer_addr,
+      <lfs_matloc> TYPE gty_matloc, "added by KPIT_090, TR- AD1K909543
+      <lfs_inv_cust> TYPE gty_customers,
+      <lfs_valid_cust> TYPE gty_customers,"added by KPIT_090, TR- AD1K910455, On 14.02.2019
+      <lfs_key_figure_value> TYPE bapi10030pbtimeseriesitem2o, "added by madhvi
+      <lfs_key_figure> TYPE bapi10030pbtimeseries2o,
+      <lfs_mat_class> TYPE gty_mat_class. "added by madhvi
+    DATA:
+      lv_saleorg TYPE vkorg,
+      lv_len TYPE int1,
+      lv_planshp TYPE /sapapo/chavl,
+      lv_sel_f TYPE /sapapo/chavl,
+      lv_sel_t TYPE /sapapo/chavl,
+      lv_tmp_prodgrp TYPE /bic/oip_prodgrp,
+      lv_tmp_dist TYPE /bic/oir_dist_af,
+      lv_tmp_state TYPE /bic/oir_state,
+      lv_prop_val TYPE /sapapo/chavl,
+      lv_pb_txt TYPE char50,
+      lv_tot_rul TYPE i,
+      lv_prc TYPE i,
+      lv_tmp TYPE char20,
+      lv_flg TYPE char1,
+      lt_tmp_knvp2 TYPE STANDARD TABLE OF gty_knvp,
+      lv_tbl_size TYPE i,
+      lt_knvp TYPE STANDARD TABLE OF gty_knvp, "added by KPIT_090, TR- AD1K910455, On 14.02.2019
+      lt_inv_customers  TYPE STANDARD TABLE OF gty_customers, "added by KPIT_090, TR- AD1K910455, On 14.02.2019
+      lv_matnr TYPE matnr.
+
+    CONCATENATE 'Executing Rule: '(020) me->gv_rule_name INTO lv_pb_txt SEPARATED BY space.
+    DESCRIBE TABLE gt_cvc LINES lv_tot_rul.
+    UNASSIGN <gfs_cvc>.
+** BOC By Chiranjeevi
+    DATA: lv_tabix TYPE sy-tabix,
+          lv_tabix2 TYPE sy-tabix.
+    IF me->gv_rule_name = 'GC-GRPCUS'.
+      lt_knvp = gt_knvp.
+      lt_tmp_knvp2 = gt_knvp2.
+      SORT lt_knvp BY   vkorg vtweg spart kunn2.
+      SORT lt_tmp_knvp2 BY kunnr vkorg vtweg spart.
+    ENDIF.
+** EOC By Chiranjeevi
+
+* Added by SN Das CD:8085178(Start)
+    CLEAR:lt_loc[],gt_cvc_tmp[].
+    gt_cvc_tmp[] = gt_cvc[].
+    SORT gt_cvc_tmp BY 9alocno.
+    DELETE ADJACENT DUPLICATES FROM gt_cvc_tmp COMPARING 9alocno.
+    IF gt_cvc_tmp[] IS NOT INITIAL.
+      SELECT locid
+             loctype
+             locno
+        FROM /sapapo/loc INTO TABLE lt_loc
+        FOR ALL ENTRIES IN gt_cvc_tmp
+        WHERE locno = gt_cvc_tmp-9alocno.
+      IF sy-subrc = 0.
+        SORT lt_loc BY locno.
+      ENDIF.
+    ENDIF.
+* Added by SN Das CD:8085178(End)
+    LOOP AT gt_cvc ASSIGNING <gfs_cvc>.
+      lv_prc = sy-tabix * 100 / lv_tot_rul.
+      me->show_progressbar(
+        iv_text = lv_pb_txt
+        iv_prc = lv_prc
+      ).
+      CLEAR: gt_sel_from, gt_sel_to, lv_prop_val.
+*      updating the CVC entries according to the rule
+      CASE me->gv_rule_name.
+        WHEN '9ALOCNO-EXCUS'.
+          READ TABLE gt_pcexcus ASSIGNING <lfs_excus> WITH KEY
+            cp1_zcountry = <gfs_cvc>-p_country BINARY SEARCH. " Added By Chiranjeevi
+          IF sy-subrc = 0 AND <lfs_excus>-zregion IS NOT INITIAL.
+            IF <gfs_cvc>-9alocno <> <lfs_excus>-zregion.
+              lv_sel_f = <gfs_cvc>-9alocno.
+              lv_prop_val = lv_sel_t = <lfs_excus>-zregion.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_9alocno
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+              lv_sel_f = lv_sel_t = <gfs_cvc>-p_country.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_country
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+              lv_sel_f = lv_sel_t = <gfs_cvc>-p_div.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_div
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+              lv_sel_f = lv_sel_t = <gfs_cvc>-p_dc.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_dc
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+            ENDIF.
+            UNASSIGN <lfs_excus>.
+          ENDIF.
+        WHEN '9ALOCNO-DC65'.
+          IF <gfs_cvc>-9alocno <> gc_locno_exd.
+            lv_sel_f = <gfs_cvc>-9alocno.
+            lv_prop_val = lv_sel_t = gc_locno_exd.
+            me->populate_info_obj(
+              EXPORTING
+                iv_fieldname = gc_fn_9alocno
+                iv_val_frm   = lv_sel_f
+                iv_val_to    = lv_sel_t
+            ).
+            lv_sel_f = lv_sel_t = <gfs_cvc>-p_dc.
+            me->populate_info_obj(
+              EXPORTING
+                iv_fieldname = gc_fn_p_dc
+                iv_val_frm   = lv_sel_f
+                iv_val_to    = lv_sel_t
+            ).
+            lv_sel_f = lv_sel_t = <gfs_cvc>-p_div.
+            me->populate_info_obj(
+              EXPORTING
+                iv_fieldname = gc_fn_p_div
+                iv_val_frm   = lv_sel_f
+                iv_val_to    = lv_sel_t
+            ).
+          ENDIF.
+        WHEN '9ALOCNO-C_CLASS'.
+          UNASSIGN <lfs_excus>.
+          READ TABLE gt_pccuscls ASSIGNING <lfs_cuscls> WITH KEY
+            zpdi = <gfs_cvc>-p_div zgrpcust = <gfs_cvc>-p_grpcust
+            zpshp = <gfs_cvc>-p_eccshp
+            BINARY SEARCH.
+          IF sy-subrc = 0.
+***            IF <lfs_cuscls>-zdefclass = gc_classif_c OR "<lfs_cuscls>-zplnclass = gc_classif_c
+            IF <lfs_cuscls>-zplnclass = gc_classif_c OR "<lfs_cuscls>-zplnclass = gc_classif_c
+              ( <lfs_cuscls>-zplnclass IS INITIAL AND <lfs_cuscls>-zdefclass = gc_classif_c ). "added by KPIT_090, TR- AD1K909543
+              IF <gfs_cvc>-9alocno = gc_locno_exd.
+                CONTINUE.
+              ENDIF.
+              lv_sel_f = <gfs_cvc>-9alocno.
+              lv_prop_val = lv_sel_t = gc_locno_exd.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_9alocno
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+              lv_sel_f = lv_sel_t = <gfs_cvc>-p_div.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_div
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+              lv_sel_f = lv_sel_t = <gfs_cvc>-p_eccshp.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_eccshp
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+              lv_sel_f = lv_sel_t = <gfs_cvc>-p_grpcust.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_grpcust
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+            ENDIF.
+          ENDIF.
+        WHEN '9ALOCNO-EXDEXW'.
+          IF <gfs_cvc>-p_planshp IS INITIAL OR strlen( <gfs_cvc>-p_planshp ) < 2.
+            CONTINUE.
+          ENDIF.
+          READ TABLE gt_pccuscls ASSIGNING <lfs_cuscls> WITH KEY
+            zpdi = <gfs_cvc>-p_div zgrpcust = <gfs_cvc>-p_grpcust
+            zpshp = <gfs_cvc>-p_eccshp
+            BINARY SEARCH.
+          IF sy-subrc = 0 AND  ( <lfs_cuscls>-zdefclass = gc_classif_c OR <lfs_cuscls>-zplnclass = gc_classif_c ).
+            CONTINUE.
+          ENDIF.
+          lv_len = strlen( <gfs_cvc>-p_planshp ) - 2.
+          IF lv_len > 1 AND <gfs_cvc>-p_planshp+lv_len(2) = '_D'.
+            IF <gfs_cvc>-9alocno <> gc_locno_exd.
+              lv_sel_f = <gfs_cvc>-9alocno.
+              lv_prop_val = lv_sel_t = gc_locno_exd.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_9alocno
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+              lv_sel_f = lv_sel_t = <gfs_cvc>-p_planshp.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_planshp
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+              lv_sel_f = lv_sel_t = <gfs_cvc>-p_div.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_div
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+            ENDIF.
+          ENDIF.
+        WHEN 'PLANSHP-C_CLASS'.
+          READ TABLE gt_pccuscls ASSIGNING <lfs_cuscls> WITH KEY
+            zpdi = <gfs_cvc>-p_div zgrpcust = <gfs_cvc>-p_grpcust
+            zpshp = <gfs_cvc>-p_eccshp
+            BINARY SEARCH.
+          IF sy-subrc = 0 "AND ( <lfs_cuscls>-zplnclass = gc_classif_c OR <lfs_cuscls>-zdefclass = gc_classif_c )
+              AND <lfs_cuscls>-zdefdepo IS NOT INITIAL.
+            IF  <lfs_cuscls>-zplnclass = gc_classif_c OR "added by KPIT_090, TR- AD1K909543
+              ( <lfs_cuscls>-zplnclass IS INITIAL AND <lfs_cuscls>-zdefclass = gc_classif_c ).
+
+              CONCATENATE <lfs_cuscls>-zdefdepo gc_classif_c INTO lv_planshp  SEPARATED BY gc_udrscr.
+              IF lv_planshp = <gfs_cvc>-p_planshp.
+                CONTINUE.
+              ENDIF.
+              lv_sel_f = lv_sel_t = <gfs_cvc>-p_div.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_div
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+              lv_sel_f = lv_sel_t = <gfs_cvc>-p_eccshp.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_eccshp
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+              lv_sel_f = lv_sel_t = <gfs_cvc>-p_grpcust.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_grpcust
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+              lv_sel_f = <gfs_cvc>-p_planshp.
+              lv_prop_val = lv_sel_t = lv_planshp.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_planshp
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+            ENDIF.
+          ENDIF.
+        WHEN 'PLANSHP-EXD'."Added by SN Das CD:8085178
+          CLEAR:lw_loc.
+          READ TABLE lt_loc INTO lw_loc
+          WITH KEY locno = <gfs_cvc>-9alocno BINARY SEARCH.
+          IF lw_loc-loctype = '1002'.
+            "Determine new plan ship
+            IF <gfs_cvc>-p_planshp CP '*_D'.
+              lv_planshp = <gfs_cvc>-p_planshp.
+            ELSE.
+              CONCATENATE <gfs_cvc>-p_planshp '_D' INTO lv_planshp.
+            ENDIF.
+          ELSE.
+            lv_planshp = <gfs_cvc>-p_planshp.
+          ENDIF.
+
+          IF lv_planshp <> <gfs_cvc>-p_planshp.
+            lv_sel_f = lv_sel_t = <gfs_cvc>-p_dc.
+            me->populate_info_obj(
+              EXPORTING
+                iv_fieldname = gc_fn_p_dc
+                iv_val_frm   = lv_sel_f
+                iv_val_to    = lv_sel_t
+            ).
+            lv_sel_f = lv_sel_t = <gfs_cvc>-p_eccshp.
+            me->populate_info_obj(
+              EXPORTING
+                iv_fieldname = gc_fn_p_eccshp
+                iv_val_frm   = lv_sel_f
+                iv_val_to    = lv_sel_t
+            ).
+            lv_sel_f = <gfs_cvc>-p_planshp.
+            lv_prop_val = lv_sel_t = lv_planshp.
+            me->populate_info_obj(
+              EXPORTING
+                iv_fieldname = gc_fn_p_planshp
+                iv_val_frm   = lv_sel_f
+                iv_val_to    = lv_sel_t
+            ).
+            lv_sel_f = lv_sel_t = <gfs_cvc>-p_div.
+            me->populate_info_obj(
+              EXPORTING
+                iv_fieldname = gc_fn_p_div
+                iv_val_frm   = lv_sel_f
+                iv_val_to    = lv_sel_t
+            ).
+          ENDIF.
+        WHEN 'PLANSHP-DC20_25'.
+          CONCATENATE <gfs_cvc>-p_eccshp <gfs_cvc>-p_dc INTO lv_planshp SEPARATED BY gc_udrscr.
+          IF lv_planshp <> <gfs_cvc>-p_planshp.
+            lv_sel_f = lv_sel_t = <gfs_cvc>-p_dc.
+            me->populate_info_obj(
+              EXPORTING
+                iv_fieldname = gc_fn_p_dc
+                iv_val_frm   = lv_sel_f
+                iv_val_to    = lv_sel_t
+            ).
+            lv_sel_f = lv_sel_t = <gfs_cvc>-p_eccshp.
+            me->populate_info_obj(
+              EXPORTING
+                iv_fieldname = gc_fn_p_eccshp
+                iv_val_frm   = lv_sel_f
+                iv_val_to    = lv_sel_t
+            ).
+            lv_sel_f = <gfs_cvc>-p_planshp.
+            lv_prop_val = lv_sel_t = lv_planshp.
+            me->populate_info_obj(
+              EXPORTING
+                iv_fieldname = gc_fn_p_planshp
+                iv_val_frm   = lv_sel_f
+                iv_val_to    = lv_sel_t
+            ).
+            lv_sel_f = lv_sel_t = <gfs_cvc>-p_div.
+            me->populate_info_obj(
+              EXPORTING
+                iv_fieldname = gc_fn_p_div
+                iv_val_frm   = lv_sel_f
+                iv_val_to    = lv_sel_t
+            ).
+          ENDIF.
+        WHEN 'PLANSHP-EXDEXW'.
+          READ TABLE gt_pccuscls ASSIGNING <lfs_cuscls> WITH KEY
+            zpdi = <gfs_cvc>-p_div zgrpcust = <gfs_cvc>-p_grpcust
+            zpshp = <gfs_cvc>-p_eccshp
+            BINARY SEARCH.
+          IF sy-subrc = 0 AND ( <lfs_cuscls>-zplnclass = gc_classif_c OR
+              ( <lfs_cuscls>-zplnclass IS INITIAL AND <lfs_cuscls>-zdefclass = gc_classif_c ) ). "added by KPIT_090, TR- AD1K909543
+            CONTINUE.
+          ENDIF.
+          CASE <gfs_cvc>-9alocno.
+            WHEN gc_locno_exd.
+              CONCATENATE <gfs_cvc>-p_eccshp '_D' INTO lv_planshp.
+            WHEN OTHERS. " gc_locno_exw or others
+              lv_planshp = <gfs_cvc>-p_eccshp.
+          ENDCASE.
+          IF lv_planshp <> <gfs_cvc>-p_planshp.
+            lv_sel_f = lv_sel_t = <gfs_cvc>-9alocno.
+            me->populate_info_obj(
+              EXPORTING
+                iv_fieldname = gc_fn_9alocno
+                iv_val_frm   = lv_sel_f
+                iv_val_to    = lv_sel_t
+            ).
+            lv_sel_f = lv_sel_t = <gfs_cvc>-p_eccshp.
+            me->populate_info_obj(
+              EXPORTING
+                iv_fieldname = gc_fn_p_eccshp
+                iv_val_frm   = lv_sel_f
+                iv_val_to    = lv_sel_t
+            ).
+            lv_sel_f = lv_sel_t = <gfs_cvc>-p_grpcust.
+            me->populate_info_obj(
+              EXPORTING
+                iv_fieldname = gc_fn_p_grpcust
+                iv_val_frm   = lv_sel_f
+                iv_val_to    = lv_sel_t
+            ).
+            lv_sel_f = <gfs_cvc>-p_planshp.
+            lv_prop_val = lv_sel_t = lv_planshp.
+            me->populate_info_obj(
+              EXPORTING
+                iv_fieldname = gc_fn_p_planshp
+                iv_val_frm   = lv_sel_f
+                iv_val_to    = lv_sel_t
+            ).
+            lv_sel_f = lv_sel_t = <gfs_cvc>-p_div.
+            me->populate_info_obj(
+              EXPORTING
+                iv_fieldname = gc_fn_p_div
+                iv_val_frm   = lv_sel_f
+                iv_val_to    = lv_sel_t
+            ).
+          ENDIF.
+        WHEN 'PLANSHP-EXCUS'.
+          READ TABLE gt_pcexcus ASSIGNING <lfs_excus> WITH KEY
+            cp1_zcountry = <gfs_cvc>-p_country
+            BINARY SEARCH.
+          IF sy-subrc = 0.
+            CALL FUNCTION 'CONVERSION_EXIT_ALPHA_OUTPUT'
+              EXPORTING
+                input  = <gfs_cvc>-p_saleorg
+              IMPORTING
+                output = lv_tmp.
+
+            CONCATENATE <lfs_excus>-zsubzone lv_tmp gc_dc_ex INTO lv_planshp SEPARATED BY gc_udrscr.
+            IF lv_planshp <> <gfs_cvc>-p_planshp.
+              lv_sel_f = <gfs_cvc>-p_planshp.
+              lv_prop_val = lv_sel_t = lv_planshp.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_planshp
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+              lv_sel_f = lv_sel_t = <gfs_cvc>-p_country.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_country
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+              lv_sel_f = lv_sel_t = <gfs_cvc>-p_saleorg.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_saleorg
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+              lv_sel_f = lv_sel_t = <gfs_cvc>-p_div.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_div
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+              lv_sel_f = lv_sel_t = <gfs_cvc>-p_dc.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_dc
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+            ENDIF.
+          ENDIF.
+        WHEN 'PLANSHPPOLY-EXCUS'.
+
+          CALL FUNCTION 'CONVERSION_EXIT_ALPHA_OUTPUT'
+            EXPORTING
+              input  = <gfs_cvc>-p_saleorg
+            IMPORTING
+              output = lv_tmp.
+          CLEAR lv_planshp.
+          CONCATENATE <gfs_cvc>-p_country lv_tmp gc_dc_ex INTO lv_planshp SEPARATED BY gc_udrscr.
+          IF lv_planshp <> <gfs_cvc>-p_planshp.
+            lv_sel_f = <gfs_cvc>-p_planshp.
+            lv_prop_val = lv_sel_t = lv_planshp.
+            me->populate_info_obj(
+              EXPORTING
+                iv_fieldname = gc_fn_p_planshp
+                iv_val_frm   = lv_sel_f
+                iv_val_to    = lv_sel_t
+            ).
+            lv_sel_f = lv_sel_t = <gfs_cvc>-p_country.
+            me->populate_info_obj(
+              EXPORTING
+                iv_fieldname = gc_fn_p_country
+                iv_val_frm   = lv_sel_f
+                iv_val_to    = lv_sel_t
+            ).
+            lv_sel_f = lv_sel_t = <gfs_cvc>-p_saleorg.
+            me->populate_info_obj(
+              EXPORTING
+                iv_fieldname = gc_fn_p_saleorg
+                iv_val_frm   = lv_sel_f
+                iv_val_to    = lv_sel_t
+            ).
+            lv_sel_f = lv_sel_t = <gfs_cvc>-p_div.
+            me->populate_info_obj(
+              EXPORTING
+                iv_fieldname = gc_fn_p_div
+                iv_val_frm   = lv_sel_f
+                iv_val_to    = lv_sel_t
+            ).
+            lv_sel_f = lv_sel_t = <gfs_cvc>-p_dc.
+            me->populate_info_obj(
+              EXPORTING
+                iv_fieldname = gc_fn_p_dc
+                iv_val_frm   = lv_sel_f
+                iv_val_to    = lv_sel_t
+            ).
+          ENDIF.
+
+        WHEN 'PLANSHP-TNTVEXCUS'.
+          READ TABLE gt_pcexcus ASSIGNING <lfs_excus> WITH KEY
+            cp1_zcountry = <gfs_cvc>-p_country
+            BINARY SEARCH.
+          IF sy-subrc = 0 AND <lfs_excus> IS ASSIGNED AND <lfs_excus>-zsubzone IS NOT INITIAL.
+            CONCATENATE <lfs_excus>-zsubzone 'TNTV' gc_dc_ex INTO lv_planshp SEPARATED BY gc_udrscr.
+            IF lv_planshp <> <gfs_cvc>-p_planshp.
+              lv_sel_f = <gfs_cvc>-p_planshp.
+              lv_prop_val = lv_planshp.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_planshp
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_planshp
+              ).
+              lv_sel_f = lv_sel_t = <gfs_cvc>-p_country.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_country
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+              lv_sel_f = lv_sel_t = <gfs_cvc>-p_saleorg.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_saleorg
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+              lv_sel_f = lv_sel_t = <gfs_cvc>-p_div.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_div
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+              lv_sel_f = lv_sel_t = <gfs_cvc>-p_dc.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_dc
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+            ENDIF.
+          ENDIF.
+        WHEN 'PLANSHPPOLY-TNTVEXCUS'.
+
+          CONCATENATE <gfs_cvc>-p_country 'TNTV' gc_dc_ex INTO lv_planshp SEPARATED BY gc_udrscr.
+          IF lv_planshp <> <gfs_cvc>-p_planshp.
+            lv_sel_f = <gfs_cvc>-p_planshp.
+            lv_prop_val = lv_planshp.
+            me->populate_info_obj(
+              EXPORTING
+                iv_fieldname = gc_fn_p_planshp
+                iv_val_frm   = lv_sel_f
+                iv_val_to    = lv_planshp
+            ).
+            lv_sel_f = lv_sel_t = <gfs_cvc>-p_country.
+            me->populate_info_obj(
+              EXPORTING
+                iv_fieldname = gc_fn_p_country
+                iv_val_frm   = lv_sel_f
+                iv_val_to    = lv_sel_t
+            ).
+            lv_sel_f = lv_sel_t = <gfs_cvc>-p_saleorg.
+            me->populate_info_obj(
+              EXPORTING
+                iv_fieldname = gc_fn_p_saleorg
+                iv_val_frm   = lv_sel_f
+                iv_val_to    = lv_sel_t
+            ).
+            lv_sel_f = lv_sel_t = <gfs_cvc>-p_div.
+            me->populate_info_obj(
+              EXPORTING
+                iv_fieldname = gc_fn_p_div
+                iv_val_frm   = lv_sel_f
+                iv_val_to    = lv_sel_t
+            ).
+            lv_sel_f = lv_sel_t = <gfs_cvc>-p_dc.
+            me->populate_info_obj(
+              EXPORTING
+                iv_fieldname = gc_fn_p_dc
+                iv_val_frm   = lv_sel_f
+                iv_val_to    = lv_sel_t
+            ).
+          ENDIF.
+
+        WHEN 'SKU-SKU'.
+          ASSIGN COMPONENT gv_fn_mat_sku OF STRUCTURE <gfs_cvc> TO <lfs_field>.
+          IF <lfs_field> IS ASSIGNED.
+            READ TABLE gt_matcls ASSIGNING <lfs_matcls>
+              WITH KEY zpdi = <gfs_cvc>-p_div zgrade = <lfs_field> "" Changed by KPIT_095 TR: AD1K912123
+              BINARY SEARCH.
+            IF sy-subrc = 0 AND <lfs_matcls> IS ASSIGNED AND <lfs_matcls>-zoffsper IS NOT INITIAL.
+              IF <lfs_matcls>-zoffsper <> <lfs_field> AND <lfs_matcls>-zoffsper IS NOT INITIAL.
+                lv_sel_f = <lfs_field>.
+                lv_prop_val = lv_sel_t = <lfs_matcls>-zoffsper.
+                me->populate_info_obj(
+                  EXPORTING
+                    iv_fieldname = gv_fn_mat_sku
+                    iv_val_frm   = lv_sel_f
+                    iv_val_to    = lv_sel_t
+                ).
+                lv_sel_f = lv_sel_t = <gfs_cvc>-p_div.
+                me->populate_info_obj(
+                  EXPORTING
+                    iv_fieldname = gc_fn_p_div
+                    iv_val_frm   = lv_sel_f
+                    iv_val_to    = lv_sel_t
+                ).
+              ENDIF.
+            ENDIF.
+          ENDIF.
+        WHEN 'TERTORY-TERRITORY'.
+          UNASSIGN <lfs_tercust>.
+          READ TABLE gt_tercust ASSIGNING <lfs_tercust>
+            WITH KEY zpdi = <gfs_cvc>-p_div zagent = <gfs_cvc>-p_agent
+              zpaposhp = <gfs_cvc>-p_eccshp zprodgrp = <gfs_cvc>-p_prodgrp
+              BINARY SEARCH.
+          IF sy-subrc = 0 AND <lfs_tercust> IS ASSIGNED AND <lfs_tercust>-zteritory IS NOT INITIAL.
+            IF <lfs_tercust>-zteritory <> <gfs_cvc>-p_tertory.
+              lv_sel_f = lv_sel_t = <gfs_cvc>-p_div.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_div
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+              lv_sel_f = lv_sel_t = <gfs_cvc>-p_agent.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_agent
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+              lv_sel_f = lv_sel_t = <gfs_cvc>-p_prodgrp.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_prodgrp
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+              lv_sel_f = lv_sel_t = <gfs_cvc>-p_eccshp.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_eccshp
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+              lv_sel_f = <gfs_cvc>-p_tertory.
+              lv_prop_val = lv_sel_t = <lfs_tercust>-zteritory.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_tertory
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+            ENDIF.
+          ENDIF.
+        WHEN 'REGOFF-REGOFF'.
+          READ TABLE gt_tercust ASSIGNING <lfs_tercust>
+            WITH KEY zpdi = <gfs_cvc>-p_div zagent = <gfs_cvc>-p_agent
+              zpaposhp = <gfs_cvc>-p_eccshp zprodgrp = <gfs_cvc>-p_prodgrp
+            BINARY SEARCH.
+          IF sy-subrc = 0 AND <lfs_tercust> IS ASSIGNED AND <lfs_tercust>-p_reg_off IS NOT INITIAL.
+            IF <lfs_tercust>-p_reg_off <> <gfs_cvc>-p_reg_off.
+              lv_sel_f = lv_sel_t = <gfs_cvc>-p_div.
+              me->populate_info_obj(
+              EXPORTING
+                iv_fieldname = gc_fn_p_div
+                iv_val_frm   = lv_sel_f
+                iv_val_to    = lv_sel_t
+            ).
+              lv_sel_f = lv_sel_t = <gfs_cvc>-p_agent.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_agent
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+              lv_sel_f = lv_sel_t = <gfs_cvc>-p_eccshp.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_eccshp
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+              lv_sel_f = lv_sel_t = <gfs_cvc>-p_prodgrp.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_prodgrp
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+              lv_sel_f = <gfs_cvc>-p_reg_off.
+              lv_prop_val = lv_sel_t = <lfs_tercust>-p_reg_off.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_reg_off
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+            ENDIF.
+          ENDIF.
+        WHEN 'GC-GRPCUS'. "group customer validation
+
+** BOC by Chiranjeevi
+          CLEAR: lv_tbl_size, lt_inv_customers, lv_tabix2 , lv_tabix.
+          UNASSIGN:  <lfs_knvp>,  <lfs_knvp2>.
+          READ TABLE lt_knvp ASSIGNING <lfs_knvp> WITH KEY vkorg =  <gfs_cvc>-p_saleorg
+                                                           vtweg = <gfs_cvc>-p_dc
+                                                           spart = <gfs_cvc>-p_div
+                                                           kunn2 = <gfs_cvc>-p_eccshp BINARY SEARCH.
+          IF sy-subrc = 0 AND <lfs_knvp> IS ASSIGNED.
+            lv_tabix = sy-tabix.
+
+            LOOP AT lt_knvp ASSIGNING <lfs_knvp> FROM lv_tabix.
+              IF <lfs_knvp>-vkorg <>  <gfs_cvc>-p_saleorg OR <lfs_knvp>-vtweg <> <gfs_cvc>-p_dc OR
+                <lfs_knvp>-spart <> <gfs_cvc>-p_div OR <lfs_knvp>-kunn2 <> <gfs_cvc>-p_eccshp.
+                EXIT.
+              ENDIF.
+
+              READ TABLE lt_tmp_knvp2  ASSIGNING <lfs_knvp2>  WITH KEY kunnr = <lfs_knvp>-kunnr
+                                                                       vkorg = <lfs_knvp>-vkorg
+                                                                       vtweg = <lfs_knvp>-vtweg
+                                                                       spart = <lfs_knvp>-spart BINARY SEARCH.
+              IF sy-subrc = 0 AND <lfs_knvp2> IS ASSIGNED .
+                lv_tabix2 = sy-tabix.
+                UNASSIGN <lfs_knvp2>.
+                LOOP AT lt_tmp_knvp2 ASSIGNING <lfs_knvp2> FROM lv_tabix2.
+                  IF <lfs_knvp2>-kunnr <> <lfs_knvp>-kunnr OR <lfs_knvp2>-vkorg <> <lfs_knvp>-vkorg OR
+                    <lfs_knvp2>-vtweg <> <lfs_knvp>-vtweg OR <lfs_knvp2>-spart <> <lfs_knvp>-spart.
+                    EXIT.
+                  ENDIF.
+                  UNASSIGN <lfs_inv_cust>.
+                  APPEND INITIAL LINE TO lt_inv_customers ASSIGNING <lfs_inv_cust>.
+                  IF <lfs_inv_cust> IS ASSIGNED.
+                    <lfs_inv_cust>-shipto = <gfs_cvc>-p_eccshp.
+                    <lfs_inv_cust>-saleorg = <lfs_knvp2>-vkorg.
+                    <lfs_inv_cust>-dc = <lfs_knvp2>-vtweg.
+                    <lfs_inv_cust>-div = <lfs_knvp2>-spart.
+                    <lfs_inv_cust>-soldto = <lfs_knvp2>-kunnr.
+                    <lfs_inv_cust>-grpcust = <lfs_knvp2>-kunn2.
+                  ENDIF.
+                ENDLOOP.
+              ENDIF.
+            ENDLOOP.
+          ENDIF.
+** EOC by Chiranjeevi
+*          CLEAR: lv_tbl_size, lt_inv_customers, lt_knvp, lt_tmp_knvp2.
+**boc: KPIT_090, TR- AD1K910455, On 14.02.2019
+*          lt_knvp = gt_knvp.
+*          UNASSIGN <lfs_knvp>.
+*          DELETE lt_knvp WHERE NOT ( vkorg = <gfs_cvc>-p_saleorg AND vtweg = <gfs_cvc>-p_dc AND
+*              spart = <gfs_cvc>-p_div AND kunn2 = <gfs_cvc>-p_eccshp ).
+**              "checking for multiple valid sold to party, if found then add it to log and display
+*          UNASSIGN <lfs_knvp>.
+*          LOOP AT lt_knvp ASSIGNING <lfs_knvp>.
+*            lt_tmp_knvp2 = gt_knvp2.
+*            DELETE lt_tmp_knvp2
+*              WHERE NOT ( kunnr = <lfs_knvp>-kunnr AND vkorg = <lfs_knvp>-vkorg AND
+*                    vtweg = <lfs_knvp>-vtweg AND spart = <lfs_knvp>-spart ).
+**              "checking multiple valid GC, if found then add it to log and display
+*            UNASSIGN <lfs_knvp2>.
+*            LOOP AT lt_tmp_knvp2 ASSIGNING <lfs_knvp2>.
+*              UNASSIGN <lfs_inv_cust>.
+*              APPEND INITIAL LINE TO lt_inv_customers ASSIGNING <lfs_inv_cust>.
+*              IF <lfs_inv_cust> IS ASSIGNED.
+*                <lfs_inv_cust>-shipto = <gfs_cvc>-p_eccshp.
+*                <lfs_inv_cust>-saleorg = <lfs_knvp2>-vkorg.
+*                <lfs_inv_cust>-dc = <lfs_knvp2>-vtweg.
+*                <lfs_inv_cust>-div = <lfs_knvp2>-spart.
+*                <lfs_inv_cust>-soldto = <lfs_knvp2>-kunnr.
+*                <lfs_inv_cust>-grpcust = <lfs_knvp2>-kunn2.
+*              ENDIF.
+*            ENDLOOP.
+*          ENDLOOP.
+          IF sy-subrc = 0.
+            DESCRIBE TABLE lt_inv_customers LINES lv_tbl_size.
+            IF lv_tbl_size > 1.
+*              if more than 1 valid customer found, then add it for the display
+              APPEND LINES OF lt_inv_customers TO gt_inv_customers.
+            ELSE.
+*              if only one valid customer found, then update GC
+              UNASSIGN <lfs_valid_cust>.
+              READ TABLE lt_inv_customers ASSIGNING <lfs_valid_cust> INDEX 1.
+              IF <lfs_valid_cust> IS ASSIGNED AND <lfs_valid_cust>-grpcust <> <gfs_cvc>-p_grpcust.
+                lv_sel_f = <gfs_cvc>-p_grpcust.
+                lv_prop_val = lv_sel_t = <lfs_valid_cust>-grpcust.
+                me->populate_info_obj(
+                  EXPORTING
+                    iv_fieldname = gc_fn_p_grpcust
+                    iv_val_frm   = lv_sel_f
+                    iv_val_to    = lv_sel_t
+                ).
+                lv_sel_f = lv_sel_t = <gfs_cvc>-p_eccshp.
+                me->populate_info_obj(
+                  EXPORTING
+                    iv_fieldname = gc_fn_p_eccshp
+                    iv_val_frm   = lv_sel_f
+                    iv_val_to    = lv_sel_t
+                ).
+                lv_sel_f = lv_sel_t = <gfs_cvc>-p_saleorg.
+                me->populate_info_obj(
+                  EXPORTING
+                    iv_fieldname = gc_fn_p_saleorg
+                    iv_val_frm   = lv_sel_f
+                    iv_val_to    = lv_sel_t
+                ).
+                lv_sel_f = lv_sel_t = <gfs_cvc>-p_dc.
+                me->populate_info_obj(
+                  EXPORTING
+                    iv_fieldname = gc_fn_p_dc
+                    iv_val_frm   = lv_sel_f
+                    iv_val_to    = lv_sel_t
+                ).
+                lv_sel_f = lv_sel_t = <gfs_cvc>-p_div.
+                me->populate_info_obj(
+                  EXPORTING
+                    iv_fieldname = gc_fn_p_div
+                    iv_val_frm   = lv_sel_f
+                    iv_val_to    = lv_sel_t
+                ).
+              ENDIF.
+            ENDIF.
+          ENDIF.
+*eoc: KPIT_090, TR- AD1K910455, On 14.02.2019
+        WHEN '9AMATNR-MAT'. "APO Product Validation
+          UNASSIGN <lfs_field>.
+          ASSIGN COMPONENT gv_fn_mat_sku OF STRUCTURE <gfs_cvc> TO <lfs_field>.
+          IF <lfs_field> IS ASSIGNED.
+            IF <gfs_cvc>-9amatnr <> <lfs_field>.
+              lv_sel_f = <gfs_cvc>-9amatnr.
+              lv_prop_val = lv_sel_t = <lfs_field>.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_9amatnr
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+              lv_sel_f = lv_sel_t = <lfs_field>.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gv_fn_mat_sku
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+              lv_sel_f = lv_sel_t = <gfs_cvc>-p_div.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_div
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+            ENDIF.
+          ENDIF.
+        WHEN 'PLANSHPPOLY-C_CLASS'.
+          READ TABLE gt_pccuscls ASSIGNING <lfs_cuscls> WITH KEY
+              zpdi = <gfs_cvc>-p_div zgrpcust = <gfs_cvc>-p_grpcust
+              zpshp = <gfs_cvc>-p_eccshp
+            BINARY SEARCH.
+          IF sy-subrc = 0 AND <lfs_cuscls> IS ASSIGNED." AND <lfs_cuscls>-zplnclass = gc_classif_c.
+
+            IF  <lfs_cuscls>-zplnclass = gc_classif_c OR "added by KPIT_090, TR- AD1K909543
+              ( <lfs_cuscls>-zplnclass IS INITIAL AND <lfs_cuscls>-zdefclass = gc_classif_c ).
+
+              READ TABLE gt_location ASSIGNING <lfs_loc>
+                WITH KEY
+                  locno = <gfs_cvc>-p_eccshp
+                BINARY SEARCH.
+              IF sy-subrc = 0 AND <lfs_loc> IS ASSIGNED AND <lfs_loc>-region IS NOT INITIAL.
+                CONCATENATE <lfs_loc>-region '_C' INTO lv_planshp.
+                IF lv_planshp = <gfs_cvc>-p_planshp.
+                  CONTINUE.
+                ENDIF.
+*                lv_sel_f = <gfs_cvc>-9alocno. "location is not used in this rule
+*                lv_prop_val = gc_locno_exd.
+*                me->populate_info_obj(
+*                  EXPORTING
+*                    iv_fieldname = gc_fn_9alocno
+*                    iv_val_frm   = lv_sel_f
+*                    iv_val_to    = gc_locno_exd
+*                ).
+                lv_sel_f = lv_sel_t = <gfs_cvc>-p_eccshp.
+                me->populate_info_obj(
+                  EXPORTING
+                    iv_fieldname = gc_fn_p_eccshp
+                    iv_val_frm   = lv_sel_f
+                    iv_val_to    = lv_sel_t
+                ).
+                lv_sel_f = lv_sel_t = <gfs_cvc>-p_grpcust.
+                me->populate_info_obj(
+                  EXPORTING
+                    iv_fieldname = gc_fn_p_grpcust
+                    iv_val_frm   = lv_sel_f
+                    iv_val_to    = lv_sel_t
+                ).
+                lv_sel_f = <gfs_cvc>-p_planshp.
+                lv_prop_val = lv_sel_t = lv_planshp.
+                me->populate_info_obj(
+                  EXPORTING
+                    iv_fieldname = gc_fn_p_planshp
+                    iv_val_frm   = lv_sel_f
+                    iv_val_to    = lv_sel_t
+                ).
+                lv_sel_f = lv_sel_t = <gfs_cvc>-p_div.
+                me->populate_info_obj(
+                  EXPORTING
+                    iv_fieldname = gc_fn_p_div
+                    iv_val_frm   = lv_sel_f
+                    iv_val_to    = lv_sel_t
+                ).
+              ENDIF.
+            ENDIF.
+          ENDIF.
+        WHEN 'PLANSHP-RESIN'.
+          READ TABLE gt_pccuscls ASSIGNING <lfs_cuscls>
+            WITH KEY
+             zpdi = <gfs_cvc>-p_div zgrpcust = <gfs_cvc>-p_grpcust
+             zpshp = <gfs_cvc>-p_eccshp
+            BINARY SEARCH.
+          IF sy-subrc = 0 AND <lfs_cuscls> IS ASSIGNED AND <lfs_cuscls>-zdefdepo = gc_defdep_resin_grp.
+            IF <gfs_cvc>-p_planshp = gc_planshp_resin.
+              CONTINUE.
+            ENDIF.
+            lv_sel_f = <gfs_cvc>-p_planshp.
+            lv_prop_val = lv_sel_t = gc_planshp_resin.
+            me->populate_info_obj(
+              EXPORTING
+                iv_fieldname = gc_fn_p_planshp
+                iv_val_frm   = lv_sel_f
+                iv_val_to    = lv_sel_t
+            ).
+            lv_sel_f = lv_sel_t = <gfs_cvc>-p_div.
+            me->populate_info_obj(
+              EXPORTING
+                iv_fieldname = gc_fn_p_div
+                iv_val_frm   = lv_sel_f
+                iv_val_to    = lv_sel_t
+            ).
+            lv_sel_f = lv_sel_t = <gfs_cvc>-p_eccshp.
+            me->populate_info_obj(
+              EXPORTING
+                iv_fieldname = gc_fn_p_eccshp
+                iv_val_frm   = lv_sel_f
+                iv_val_to    = lv_sel_t
+            ).
+            lv_sel_f = lv_sel_t = <gfs_cvc>-p_grpcust.
+            me->populate_info_obj(
+              EXPORTING
+                iv_fieldname = gc_fn_p_grpcust
+                iv_val_frm   = lv_sel_f
+                iv_val_to    = lv_sel_t
+            ).
+          ENDIF.
+        WHEN 'PRDGRP-PSKU_PRDGRP'.
+          READ TABLE gt_matkey ASSIGNING <lfs_matkey> WITH KEY
+            matnr = <gfs_cvc>-matnr
+            BINARY SEARCH.
+          IF sy-subrc = 0 AND <lfs_matkey> IS ASSIGNED AND <lfs_matkey>-matkl IS NOT INITIAL.
+
+            CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+              EXPORTING
+                input  = <lfs_matkey>-matkl
+              IMPORTING
+                output = lv_tmp_prodgrp.
+            IF <gfs_cvc>-p_prodgrp <> lv_tmp_prodgrp.
+              UNASSIGN <lfs_field>.
+              ASSIGN COMPONENT gv_fn_mat_sku OF STRUCTURE <gfs_cvc> TO <lfs_field>.
+              IF <lfs_field> IS ASSIGNED.
+                lv_sel_f = lv_sel_t = <gfs_cvc>-matnr.
+                me->populate_info_obj(
+                  EXPORTING
+                    iv_fieldname = gv_fn_mat_sku
+                    iv_val_frm   = lv_sel_f
+                    iv_val_to    = lv_sel_t
+                ).
+
+                lv_sel_f = <gfs_cvc>-p_prodgrp.
+                lv_prop_val = lv_sel_t = lv_tmp_prodgrp.
+                me->populate_info_obj(
+                  EXPORTING
+                    iv_fieldname = gc_fn_p_prodgrp
+                    iv_val_frm   = lv_sel_f
+                    iv_val_to    = lv_sel_t
+                ).
+                lv_sel_f = lv_sel_t = <gfs_cvc>-p_div.
+                me->populate_info_obj(
+                  EXPORTING
+                    iv_fieldname = gc_fn_p_div
+                    iv_val_frm   = lv_sel_f
+                    iv_val_to    = lv_sel_t
+                ).
+              ENDIF.
+            ENDIF.
+          ENDIF.
+        WHEN 'P_SKU-DOMR_EXE'.
+*          reading the param table to the the comparision operand value
+          READ TABLE gt_zapoparam ASSIGNING <lfs_zapoparam>
+            WITH KEY
+              param3 = p_bsggrp
+              param4 = <gfs_cvc>-p_div
+              param5 = <gfs_cvc>-p_dc.
+          IF sy-subrc = 0 AND NOT ( <gfs_cvc>-9alocno EQ '39SK' OR <gfs_cvc>-9alocno EQ '39SP'  ).
+            UNASSIGN <lfs_field>.
+            ASSIGN COMPONENT gv_fn_mat_sku OF STRUCTURE <gfs_cvc> TO <lfs_field>.
+            IF <lfs_field> IS ASSIGNED.
+              lv_len = strlen( <lfs_field> ) - 1.
+*              checking whether the Material(SKU) is ending with the oprand value
+*              which is read from param table
+              IF lv_len > 0 AND <lfs_field>+lv_len(1) <> <lfs_zapoparam>-value1.
+                lv_sel_f = lv_sel_t = <lfs_field>.
+                lv_sel_t+lv_len(1) = <lfs_zapoparam>-value1.
+                lv_prop_val = lv_sel_t.
+                me->populate_info_obj(
+                  EXPORTING
+                    iv_fieldname = gv_fn_mat_sku
+                    iv_val_frm   = lv_sel_f
+                    iv_val_to    = lv_sel_t
+                ).
+                lv_sel_f = lv_sel_t = <gfs_cvc>-p_div.
+                me->populate_info_obj(
+                  EXPORTING
+                    iv_fieldname = gc_fn_p_div
+                    iv_val_frm   = lv_sel_f
+                    iv_val_to    = lv_sel_t
+                ).
+                lv_sel_f = lv_sel_t = <gfs_cvc>-p_dc.
+                me->populate_info_obj(
+                  EXPORTING
+                    iv_fieldname = gc_fn_p_dc
+                    iv_val_frm   = lv_sel_f
+                    iv_val_to    = lv_sel_t
+                ).
+                lv_sel_f = lv_sel_t = <gfs_cvc>-9alocno.
+                me->populate_info_obj(
+                  EXPORTING
+                    iv_fieldname = gc_fn_9alocno
+                    iv_val_frm   = lv_sel_f
+                    iv_val_to    = lv_sel_t
+                ).
+              ENDIF.
+            ENDIF.
+          ENDIF.
+        WHEN 'R_STATE-STATE'.
+          UNASSIGN <lfs_field>.
+          ASSIGN COMPONENT gv_fn_sp OF STRUCTURE <gfs_cvc> TO <lfs_field>.
+          IF <lfs_field> IS ASSIGNED.
+            READ TABLE gt_location ASSIGNING <lfs_loc> WITH KEY
+                locno = <lfs_field>
+              BINARY SEARCH.
+            IF sy-subrc = 0 AND <lfs_loc> IS ASSIGNED AND <lfs_loc>-region IS NOT INITIAL.
+              IF <lfs_loc>-region <> <gfs_cvc>-r_state.
+                lv_sel_f = <gfs_cvc>-r_state.
+
+                CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+                  EXPORTING
+                    input  = <lfs_loc>-region
+                  IMPORTING
+                    output = lv_tmp_state.
+
+                lv_prop_val = lv_sel_t = lv_tmp_state.
+                me->populate_info_obj(
+                  EXPORTING
+                    iv_fieldname = gc_fn_r_state
+                    iv_val_frm   = lv_sel_f
+                    iv_val_to    = lv_sel_t
+                ).
+                lv_sel_f = lv_sel_t = <lfs_field>.
+                me->populate_info_obj(
+                  EXPORTING
+                    iv_fieldname = gv_fn_sp
+                    iv_val_frm   = lv_sel_f
+                    iv_val_to    = lv_sel_t
+                ).
+              ENDIF.
+            ENDIF.
+          ENDIF.
+        WHEN 'R_STATE-STATE_IN'.
+          UNASSIGN <lfs_field>.
+          ASSIGN COMPONENT gv_fn_sp OF STRUCTURE <gfs_cvc> TO <lfs_field>.
+          IF <lfs_field> IS ASSIGNED.
+            READ TABLE gt_location ASSIGNING <lfs_loc> WITH KEY
+                locno = <lfs_field>
+              BINARY SEARCH .
+            IF sy-subrc = 0 AND <lfs_loc> IS ASSIGNED AND <lfs_loc>-region IS NOT INITIAL.
+              CLEAR lv_tmp.
+              CONCATENATE 'IN' <lfs_loc>-region INTO lv_tmp.
+              IF lv_tmp <> <gfs_cvc>-r_state.
+                lv_sel_f = <gfs_cvc>-r_state.
+
+                lv_prop_val = lv_sel_t = lv_tmp.
+                me->populate_info_obj(
+                  EXPORTING
+                    iv_fieldname = gc_fn_r_state
+                    iv_val_frm   = lv_sel_f
+                    iv_val_to    = lv_sel_t
+                ).
+                lv_sel_f = lv_sel_t = <lfs_field>.
+                me->populate_info_obj(
+                  EXPORTING
+                    iv_fieldname = gv_fn_sp
+                    iv_val_frm   = lv_sel_f
+                    iv_val_to    = lv_sel_t
+                ).
+              ENDIF.
+            ENDIF.
+          ENDIF.
+        WHEN 'R_DISTRICT-DISTRICT'.
+          UNASSIGN <lfs_field>.
+          ASSIGN COMPONENT gv_fn_sp OF STRUCTURE <gfs_cvc> TO <lfs_field>.
+          IF <lfs_field> IS ASSIGNED.
+            READ TABLE gt_customer_addr ASSIGNING <lfs_cust_a>
+              WITH KEY
+                kunnr = <lfs_field>
+              BINARY SEARCH.
+            IF sy-subrc = 0 AND <lfs_cust_a> IS ASSIGNED AND <lfs_cust_a>-regio IS NOT INITIAL.
+              CLEAR lv_tmp_dist.
+              CONCATENATE <lfs_cust_a>-regio <lfs_cust_a>-counc INTO lv_tmp_dist.
+
+              CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+                EXPORTING
+                  input  = lv_tmp_dist
+                IMPORTING
+                  output = lv_tmp_dist.
+
+              UNASSIGN <lfs_field1>.
+              ASSIGN COMPONENT gv_fn_dist OF STRUCTURE <gfs_cvc> TO <lfs_field1>.
+              IF <lfs_field1> IS ASSIGNED.
+                IF lv_tmp_dist <> <lfs_field1>.
+                  lv_sel_f = <lfs_field1>.
+                  lv_prop_val = lv_sel_t = lv_tmp_dist.
+                  me->populate_info_obj(
+                    EXPORTING
+                      iv_fieldname = gv_fn_dist
+                      iv_val_frm   = lv_sel_f
+                      iv_val_to    = lv_sel_t
+                  ).
+                  lv_sel_f = lv_sel_t = <lfs_field>.
+                  me->populate_info_obj(
+                    EXPORTING
+                      iv_fieldname = gv_fn_sp
+                      iv_val_frm   = lv_sel_f
+                      iv_val_to    = lv_sel_t
+                  ).
+                ENDIF.
+              ENDIF.
+            ENDIF.
+          ENDIF.
+        WHEN 'R_REGION-REGION'.
+          UNASSIGN <lfs_field>.
+          ASSIGN COMPONENT gv_fn_sp OF STRUCTURE <gfs_cvc> TO <lfs_field>.
+          IF <lfs_field> IS ASSIGNED.
+            READ TABLE gt_cust ASSIGNING <lfs_cust> WITH KEY
+              r_cus = <lfs_field>
+              r_state = <gfs_cvc>-r_state
+            BINARY SEARCH.
+            IF sy-subrc = 0 AND <lfs_cust> IS ASSIGNED AND <lfs_cust>-r_region IS NOT INITIAL.
+              IF <lfs_cust>-r_region <> <gfs_cvc>-r_region.
+                lv_sel_f = <gfs_cvc>-r_region.
+                lv_prop_val = lv_sel_t = <lfs_cust>-r_region.
+                me->populate_info_obj(
+                  EXPORTING
+                    iv_fieldname = gc_fn_r_region
+                    iv_val_frm   = lv_sel_f
+                    iv_val_to    = lv_sel_t
+                ).
+                lv_sel_f = lv_sel_t = <lfs_field>.
+                me->populate_info_obj(
+                  EXPORTING
+                    iv_fieldname = gv_fn_sp
+                    iv_val_frm   = lv_sel_f
+                    iv_val_to    = lv_sel_t
+                ).
+              ENDIF.
+            ENDIF.
+          ENDIF.
+
+**********************************************************************
+*    BOC: KPIT_090
+*    TR: AD1K909543
+**********************************************************************
+
+        WHEN 'SKU-AAG'.
+
+          CLEAR lv_flg.
+          UNASSIGN <lfs_matloc>.
+          READ TABLE gt_matloc ASSIGNING <lfs_matloc>
+            WITH KEY matnr = <gfs_cvc>-9amatnr"<gfs_cvc>-matnr Hiral 28.07.2022
+            BINARY SEARCH.
+          IF sy-subrc = 0.
+            IF <gfs_cvc>-p_aag <> gc_at103_pc.
+              lv_prop_val = lv_sel_t = gc_at103_pc.
+              lv_flg = abap_true.
+            ENDIF.
+          ELSE.
+            IF <gfs_cvc>-p_aag <> gc_at103_nd.
+              lv_prop_val = lv_sel_t = gc_at103_nd.
+              lv_flg = abap_true.
+            ENDIF.
+          ENDIF.
+
+          IF lv_flg = abap_true.
+**
+************************************************************************
+***    BOC  : KPIT_090
+***    Date : 12/05/2018
+***    TR   : AD1K909893
+***    Description: ND PC Enhancement
+************************************************************************
+            IF lv_sel_t <> gc_at103_nd.
+              READ TABLE gt_matkey TRANSPORTING NO FIELDS WITH KEY matnr = <gfs_cvc>-9amatnr BINARY SEARCH."matnr = <gfs_cvc>-matnr BINARY SEARCH.
+              IF sy-subrc = 0.
+                lv_prop_val = lv_sel_t = gc_at103_nd.
+              ENDIF.
+            ENDIF.
+
+          ELSE.
+            lv_prop_val = lv_sel_t = <gfs_cvc>-p_aag.
+          ENDIF.
+
+***********************BOC Added by Hiral on 28.07.2022********************************
+          IF lv_prop_val IS NOT INITIAL AND <gfs_cvc> IS ASSIGNED.
+            UNASSIGN <lfs_fin>.
+            APPEND INITIAL LINE TO gt_final ASSIGNING <lfs_fin>.
+            IF <lfs_fin> IS ASSIGNED.
+              MOVE-CORRESPONDING <gfs_cvc> TO <lfs_fin>.
+              <lfs_fin>-rule = me->gv_rule_name.
+              <lfs_fin>-prop_val = lv_prop_val.
+            ENDIF.
+          ENDIF.
+***********************EOC Added by Hiral on 28.07.2022********************************
+************************************************************************
+***    EOC: KPIT_090
+**********************************************************************
+
+****            lv_sel_f = <gfs_cvc>-p_aag.
+****            me->populate_info_obj(
+****                    EXPORTING
+****                      iv_fieldname = gc_fn_p_aag
+****                      iv_val_frm   = lv_sel_f
+****                      iv_val_to    = lv_sel_t
+****                  ).
+****
+****            lv_sel_f = lv_sel_t = <gfs_cvc>-p_div.
+****            me->populate_info_obj(
+****              EXPORTING
+****                iv_fieldname = gc_fn_p_div
+****                iv_val_frm   = lv_sel_f
+****                iv_val_to    = lv_sel_t
+****            ).
+****
+****            lv_sel_f = lv_sel_t = <gfs_cvc>-p_dc.
+****            me->populate_info_obj(
+****              EXPORTING
+****                iv_fieldname = gc_fn_p_dc
+****                iv_val_frm   = lv_sel_f
+****                iv_val_to    = lv_sel_t
+****            ).
+****
+****            lv_sel_f = lv_sel_t = <gfs_cvc>-p_eccshp.
+****            me->populate_info_obj(
+****              EXPORTING
+****                iv_fieldname = gc_fn_p_eccshp
+****                iv_val_frm   = lv_sel_f
+****                iv_val_to    = lv_sel_t
+****            ).
+****            CALL FUNCTION 'CONVERSION_EXIT_ALPHA_OUTPUT'
+****              EXPORTING
+****                input  = <gfs_cvc>-p_saleorg
+****              IMPORTING
+****                output = lv_tmp.
+****            lv_sel_f = lv_sel_t = lv_tmp.
+****            me->populate_info_obj(
+****              EXPORTING
+****                iv_fieldname = gc_fn_p_saleorg
+****                iv_val_frm   = lv_sel_f
+****                iv_val_to    = lv_sel_t
+****            ).
+****
+****
+****            UNASSIGN <lfs_field>.
+****            ASSIGN COMPONENT gv_fn_mat_sku OF STRUCTURE <gfs_cvc> TO <lfs_field>.
+****            IF <lfs_field> IS ASSIGNED.
+****              lv_sel_f = lv_sel_t = <lfs_field>.
+****              me->populate_info_obj(
+****                  EXPORTING
+****                    iv_fieldname = gv_fn_mat_sku
+****                    iv_val_frm   = lv_sel_f
+****                    iv_val_to    = lv_sel_t
+****                ).
+****            ENDIF.
+
+**** BOC By Chiranjeevi
+*            lv_sel_f = lv_sel_t = <gfs_cvc>-9alocno.
+*            me->populate_info_obj(
+*              EXPORTING
+*                iv_fieldname = gc_fn_9alocno
+*                iv_val_frm   = lv_sel_f
+*                iv_val_to    = lv_sel_t
+*            ).
+**** EOC By Chiranjeevi
+*          ENDIF.
+
+*BOC by naveen on 20-05-2020
+
+        WHEN 'SKU-AAG_POLY'.
+          CLEAR lv_flg.
+          UNASSIGN <gfs_mrp>.
+          READ TABLE gt_mrp ASSIGNING <gfs_mrp>
+            WITH KEY matnr = <gfs_cvc>-9amatnr"matnr = <gfs_cvc>-matnr Hiral 28.07.2022
+            BINARY SEARCH.
+          "zapoloc = <gfs_cvc>-9alocno.
+          IF sy-subrc = 0 AND <gfs_mrp> IS ASSIGNED.
+            lv_prop_val  = <gfs_mrp>-at103.
+            IF lv_prop_val IS NOT INITIAL AND <gfs_cvc> IS ASSIGNED.
+              UNASSIGN <lfs_fin>.
+              APPEND INITIAL LINE TO gt_final ASSIGNING <lfs_fin>.
+              IF <lfs_fin> IS ASSIGNED.
+                MOVE-CORRESPONDING <gfs_cvc> TO <lfs_fin>.
+                <lfs_fin>-rule = me->gv_rule_name.
+                <lfs_fin>-prop_val = lv_prop_val.
+              ENDIF.
+            ENDIF.
+*            IF <gfs_cvc>-p_aag <> <gfs_mrp>-at103.
+*              lv_prop_val = lv_sel_t = <gfs_mrp>-at103.
+*              lv_flg = abap_true.
+*            ENDIF.
+          ENDIF.
+*          IF lv_flg = abap_true.
+*
+*            lv_sel_f = <gfs_cvc>-p_aag.
+*            me->populate_info_obj(
+*                    EXPORTING
+*                      iv_fieldname = gc_fn_p_aag
+*                      iv_val_frm   = lv_sel_f
+*                      iv_val_to    = lv_sel_t
+*                  ).
+*
+**            lv_sel_f = lv_sel_t = <gfs_cvc>-9alocno.
+**            me->populate_info_obj(
+**              EXPORTING
+**                iv_fieldname = gc_fn_9alocno
+**                iv_val_frm   = lv_sel_f
+**                iv_val_to    = lv_sel_t
+**            ).
+*
+*            UNASSIGN <lfs_field>.
+*            ASSIGN COMPONENT gv_fn_mat_sku OF STRUCTURE <gfs_cvc> TO <lfs_field>.
+*            IF <lfs_field> IS ASSIGNED.
+*              lv_sel_f = lv_sel_t = <lfs_field>.
+*              me->populate_info_obj(
+*                  EXPORTING
+*                    iv_fieldname = gv_fn_mat_sku
+*                    iv_val_frm   = lv_sel_f
+*                    iv_val_to    = lv_sel_t
+*                ).
+*            ENDIF.
+*            lv_sel_f = lv_sel_t = <gfs_cvc>-p_div.
+*            me->populate_info_obj(
+*              EXPORTING
+*                iv_fieldname = gc_fn_p_div
+*                iv_val_frm   = lv_sel_f
+*                iv_val_to    = lv_sel_t
+*            ).
+*
+*            lv_sel_f = lv_sel_t = <gfs_cvc>-p_dc.
+*            me->populate_info_obj(
+*              EXPORTING
+*                iv_fieldname = gc_fn_p_dc
+*                iv_val_frm   = lv_sel_f
+*                iv_val_to    = lv_sel_t
+*            ).
+*
+*            lv_sel_f = lv_sel_t = <gfs_cvc>-p_eccshp.
+*            me->populate_info_obj(
+*              EXPORTING
+*                iv_fieldname = gc_fn_p_eccshp
+*                iv_val_frm   = lv_sel_f
+*                iv_val_to    = lv_sel_t
+*            ).
+*            CALL FUNCTION 'CONVERSION_EXIT_ALPHA_OUTPUT'
+*              EXPORTING
+*                input  = <gfs_cvc>-p_saleorg
+*              IMPORTING
+*                output = lv_tmp.
+*            lv_sel_f = lv_sel_t = lv_tmp.
+*            lv_sel_f = lv_sel_t = <gfs_cvc>-p_saleorg.
+*            me->populate_info_obj(
+*              EXPORTING
+*                iv_fieldname = gc_fn_p_saleorg
+*                iv_val_frm   = lv_sel_f
+*                iv_val_to    = lv_sel_t
+*            ).
+**            lv_sel_f = lv_sel_t = <gfs_cvc>-p_eccshp.
+**            me->populate_info_obj(
+**              EXPORTING
+**                iv_fieldname = gc_fn_p_eccshp
+**                iv_val_frm   = lv_sel_f
+**                iv_val_to    = lv_sel_t
+**            ).
+*
+*          ENDIF.
+
+*EOC by naveen on 20-05-2020
+
+        WHEN 'TERTORY-DIV_SHP'.
+          UNASSIGN <lfs_tercust>.
+          READ TABLE gt_tercust ASSIGNING <lfs_tercust>
+            WITH KEY zpdi = <gfs_cvc>-p_div zpaposhp = <gfs_cvc>-p_eccshp
+            BINARY SEARCH.
+          IF sy-subrc = 0 AND <lfs_tercust> IS ASSIGNED AND <lfs_tercust>-zteritory IS NOT INITIAL.
+            IF <lfs_tercust>-zteritory <> <gfs_cvc>-p_tertory.
+              lv_sel_f = lv_sel_t = <gfs_cvc>-p_div.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_div
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+              lv_sel_f = lv_sel_t = <gfs_cvc>-p_eccshp.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_eccshp
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+              lv_sel_f = <gfs_cvc>-p_tertory.
+              lv_prop_val = lv_sel_t = <lfs_tercust>-zteritory.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_tertory
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+            ENDIF.
+          ENDIF.
+        WHEN 'TERTORY-DIV_SHP_AGNT'.
+          UNASSIGN <lfs_tercust>.
+          READ TABLE gt_tercust ASSIGNING <lfs_tercust>
+            WITH KEY zpdi = <gfs_cvc>-p_div zagent = <gfs_cvc>-p_agent
+              zpaposhp = <gfs_cvc>-p_eccshp
+            BINARY SEARCH.
+          IF sy-subrc = 0 AND <lfs_tercust> IS ASSIGNED AND <lfs_tercust>-zteritory IS NOT INITIAL.
+            IF <lfs_tercust>-zteritory <> <gfs_cvc>-p_tertory.
+              lv_sel_f = lv_sel_t = <gfs_cvc>-p_div.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_div
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+              lv_sel_f = lv_sel_t = <gfs_cvc>-p_agent.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_agent
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+              lv_sel_f = lv_sel_t = <gfs_cvc>-p_eccshp.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_eccshp
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+              lv_sel_f = <gfs_cvc>-p_tertory.
+              lv_prop_val = lv_sel_t = <lfs_tercust>-zteritory.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_tertory
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+            ENDIF.
+          ENDIF.
+        WHEN 'TERTORY-DIV_SHP_PG'.
+          UNASSIGN <lfs_tercust>.
+          READ TABLE gt_tercust ASSIGNING <lfs_tercust>
+            WITH KEY zpdi = <gfs_cvc>-p_div zpaposhp = <gfs_cvc>-p_eccshp
+              zprodgrp = <gfs_cvc>-p_prodgrp
+            BINARY SEARCH.
+          IF sy-subrc = 0 AND <lfs_tercust> IS ASSIGNED AND <lfs_tercust>-zteritory IS NOT INITIAL.
+            IF <lfs_tercust>-zteritory <> <gfs_cvc>-p_tertory.
+              lv_sel_f = lv_sel_t = <gfs_cvc>-p_div.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_div
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+              lv_sel_f = lv_sel_t = <gfs_cvc>-p_prodgrp.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_prodgrp
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+              lv_sel_f = lv_sel_t = <gfs_cvc>-p_eccshp.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_eccshp
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+              lv_sel_f = <gfs_cvc>-p_tertory.
+              lv_prop_val = lv_sel_t = <lfs_tercust>-zteritory.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_tertory
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+            ENDIF.
+          ENDIF.
+        WHEN 'REGOFF-DIV_SHP'.
+          READ TABLE gt_tercust ASSIGNING <lfs_tercust>
+            WITH KEY zpdi = <gfs_cvc>-p_div zpaposhp = <gfs_cvc>-p_eccshp
+            BINARY SEARCH.
+          IF sy-subrc = 0 AND <lfs_tercust> IS ASSIGNED AND <lfs_tercust>-p_reg_off IS NOT INITIAL.
+            IF <lfs_tercust>-p_reg_off <> <gfs_cvc>-p_reg_off.
+              lv_sel_f = lv_sel_t = <gfs_cvc>-p_div.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_div
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+              lv_sel_f = lv_sel_t = <gfs_cvc>-p_eccshp.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_eccshp
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+              lv_sel_f = <gfs_cvc>-p_reg_off.
+              lv_prop_val = lv_sel_t = <lfs_tercust>-p_reg_off.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_reg_off
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+            ENDIF.
+          ENDIF.
+        WHEN 'REGOFF-DIV_SHP_AGNT'.
+          READ TABLE gt_tercust ASSIGNING <lfs_tercust>
+            WITH KEY zpdi = <gfs_cvc>-p_div zagent = <gfs_cvc>-p_agent
+              zpaposhp = <gfs_cvc>-p_eccshp
+            BINARY SEARCH.
+          IF sy-subrc = 0 AND <lfs_tercust> IS ASSIGNED AND <lfs_tercust>-p_reg_off IS NOT INITIAL.
+            IF <lfs_tercust>-p_reg_off <> <gfs_cvc>-p_reg_off.
+              lv_sel_f = lv_sel_t = <gfs_cvc>-p_div.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_div
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+              lv_sel_f = lv_sel_t = <gfs_cvc>-p_eccshp.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_eccshp
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+              lv_sel_f = lv_sel_t = <gfs_cvc>-p_agent.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_agent
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+              lv_sel_f = <gfs_cvc>-p_reg_off.
+              lv_prop_val = lv_sel_t = <lfs_tercust>-p_reg_off.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_reg_off
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+            ENDIF.
+          ENDIF.
+        WHEN 'REGOFF-DIV_SHP_PG'.
+          READ TABLE gt_tercust ASSIGNING <lfs_tercust>
+            WITH KEY zpdi = <gfs_cvc>-p_div zpaposhp = <gfs_cvc>-p_eccshp
+              zprodgrp = <gfs_cvc>-p_prodgrp
+            BINARY SEARCH.
+          IF sy-subrc = 0 AND <lfs_tercust> IS ASSIGNED AND <lfs_tercust>-p_reg_off IS NOT INITIAL.
+            IF <lfs_tercust>-p_reg_off <> <gfs_cvc>-p_reg_off.
+              lv_sel_f = lv_sel_t = <gfs_cvc>-p_div.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_div
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+              lv_sel_f = lv_sel_t = <gfs_cvc>-p_eccshp.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_eccshp
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+              lv_sel_f = lv_sel_t = <gfs_cvc>-p_prodgrp.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_prodgrp
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+              lv_sel_f = <gfs_cvc>-p_reg_off.
+              lv_prop_val = lv_sel_t = <lfs_tercust>-p_reg_off.
+              me->populate_info_obj(
+                EXPORTING
+                  iv_fieldname = gc_fn_p_reg_off
+                  iv_val_frm   = lv_sel_f
+                  iv_val_to    = lv_sel_t
+              ).
+            ENDIF.
+          ENDIF.
+
+**********************************************************************
+*    EOC: KPIT_090
+**********************************************************************
+
+*boc:KPIT_090, TR- AD1K910455, On 14.02.2019
+        WHEN 'DC-AAG'.
+          UNASSIGN <lfs_zapoparam>.
+          READ TABLE gt_zapoparam ASSIGNING <lfs_zapoparam>
+            WITH KEY
+              param3 = 'DC'
+              param4 = <gfs_cvc>-p_dc.
+          IF sy-subrc = 0 AND <lfs_zapoparam> IS ASSIGNED
+            AND <lfs_zapoparam>-value1 <> <gfs_cvc>-p_aag.
+            lv_sel_f = lv_sel_t = <gfs_cvc>-p_dc.
+            me->populate_info_obj(
+              EXPORTING
+                iv_fieldname = gc_fn_p_dc
+                iv_val_frm   = lv_sel_f
+                iv_val_to    = lv_sel_t
+            ).
+
+*BOC by naveenm
+            lv_sel_f = lv_sel_t = <gfs_cvc>-p_div.
+            me->populate_info_obj(
+              EXPORTING
+                iv_fieldname = gc_fn_p_div
+                iv_val_frm   = lv_sel_f
+                iv_val_to    = lv_sel_t
+            ).
+*EOC by naveenm
+
+
+            lv_sel_f = <gfs_cvc>-p_aag.
+            lv_prop_val = lv_sel_t = <lfs_zapoparam>-value1.
+            me->populate_info_obj(
+              EXPORTING
+                iv_fieldname = gc_fn_p_aag
+                iv_val_frm   = lv_sel_f
+                iv_val_to    = lv_sel_t
+            ).
+
+          ENDIF.
+*eoc: KPIT_090, TR- AD1K910455, On 14.02.2019
+        WHEN 'SEG-SEG'.
+          lv_saleorg = <gfs_cvc>-p_saleorg+6(4).
+          UNASSIGN <lfs_cust_seg>.
+          READ TABLE gt_cust_seg ASSIGNING <lfs_cust_seg>
+            WITH KEY
+              division  = <gfs_cvc>-p_div
+              vkorg     = lv_saleorg
+              grpcust   = <gfs_cvc>-p_grpcust
+            BINARY SEARCH.
+          IF sy-subrc = 0 AND <lfs_cust_seg> IS ASSIGNED.
+            lv_prop_val = lv_sel_t = <lfs_cust_seg>-segment.
+          ELSE.
+            IF <gfs_cvc>-p_segment <> gc_segment_v.
+              lv_prop_val = lv_sel_t = gc_segment_v.
+            ELSE.
+              CONTINUE.
+            ENDIF.
+          ENDIF.
+
+          IF <gfs_cvc>-p_segment = lv_sel_t.
+            CONTINUE.
+          ENDIF.
+
+          lv_sel_f = <gfs_cvc>-p_segment.
+          me->populate_info_obj(
+            EXPORTING
+              iv_fieldname = gc_fn_p_segment
+              iv_val_frm   = lv_sel_f
+              iv_val_to    = lv_sel_t
+          ).
+
+          lv_sel_f = lv_sel_t = <gfs_cvc>-p_div.
+          me->populate_info_obj(
+            EXPORTING
+              iv_fieldname = gc_fn_p_div
+              iv_val_frm   = lv_sel_f
+              iv_val_to    = lv_sel_t
+          ).
+          CALL FUNCTION 'CONVERSION_EXIT_ALPHA_OUTPUT'
+            EXPORTING
+              input  = <gfs_cvc>-p_saleorg
+            IMPORTING
+              output = lv_tmp.
+          lv_sel_f = lv_sel_t = lv_tmp.
+          lv_sel_f = lv_sel_t = <gfs_cvc>-p_saleorg.
+          me->populate_info_obj(
+            EXPORTING
+              iv_fieldname = gc_fn_p_saleorg
+              iv_val_frm   = lv_sel_f
+              iv_val_to    = lv_sel_t
+          ).
+
+          lv_sel_f = lv_sel_t = <gfs_cvc>-p_grpcust.
+          me->populate_info_obj(
+            EXPORTING
+              iv_fieldname = gc_fn_p_grpcust
+              iv_val_frm   = lv_sel_f
+              iv_val_to    = lv_sel_t
+          ).
+        WHEN 'ECCSHP-AAG_MATDEL'.
+          CLEAR lv_matnr.
+          lv_matnr = <gfs_cvc>-9amatnr.
+          READ TABLE gt_matnr_rule INTO gw_matnr WITH KEY matnr = lv_matnr BINARY SEARCH.
+          IF sy-subrc = 0.
+            IF gw_matnr-lvorm IS NOT INITIAL." AND <gfs_cvc>-p_aag NE 'ND'.
+              lv_prop_val = 'ND'.
+            ELSEIF gw_matnr-lvorm IS INITIAL." AND <gfs_cvc>-p_aag NE 'PC'.
+              lv_prop_val = 'PC'.
+            ENDIF.
+          ENDIF.
+          IF lv_prop_val IS NOT INITIAL AND <gfs_cvc> IS ASSIGNED.
+            UNASSIGN <lfs_fin>.
+            APPEND INITIAL LINE TO gt_final ASSIGNING <lfs_fin>.
+            IF <lfs_fin> IS ASSIGNED.
+              MOVE-CORRESPONDING <gfs_cvc> TO <lfs_fin>.
+              <lfs_fin>-rule = me->gv_rule_name.
+              <lfs_fin>-prop_val = lv_prop_val.
+            ENDIF.
+          ENDIF.
+
+*          APPEND LINES OF gt_final TO gt_final1.
+*          IF p_exec EQ abap_true AND lv_prop_val IS NOT INITIAL.
+*
+*            lv_sel_f = <gfs_cvc>-p_aag.
+*            lv_sel_t = lv_prop_val.
+*            me->populate_info_obj(
+*              EXPORTING
+*                iv_fieldname = gc_fn_p_aag
+*                iv_val_frm   = lv_sel_f
+*                iv_val_to    = lv_sel_t
+*            ).
+*
+*            lv_sel_f = lv_sel_t = <gfs_cvc>-p_div.
+*            me->populate_info_obj(
+*              EXPORTING
+*                iv_fieldname = gc_fn_p_div
+*                iv_val_frm   = lv_sel_f
+*                iv_val_to    = lv_sel_t
+*            ).
+*
+*            lv_sel_f = lv_sel_t = <gfs_cvc>-p_dc.
+*            me->populate_info_obj(
+*              EXPORTING
+*                iv_fieldname = gc_fn_p_dc
+*                iv_val_frm   = lv_sel_f
+*                iv_val_to    = lv_sel_t
+*            ).
+*
+*            lv_sel_f = lv_sel_t = <gfs_cvc>-p_eccshp.
+*            me->populate_info_obj(
+*              EXPORTING
+*                iv_fieldname = gc_fn_p_eccshp
+*                iv_val_frm   = lv_sel_f
+*                iv_val_to    = lv_sel_t
+*            ).
+*
+*            lv_sel_f = lv_sel_t = <gfs_cvc>-p_saleorg.
+*            me->populate_info_obj(
+*              EXPORTING
+*                iv_fieldname = gc_fn_p_saleorg
+*                iv_val_frm   = lv_sel_f
+*                iv_val_to    = lv_sel_t
+*            ).
+*
+*            ASSIGN COMPONENT gc_fn_9amatnr OF STRUCTURE <gfs_cvc> TO <lfs_field>.
+*            IF sy-subrc EQ 0.
+*              lv_sel_f = lv_sel_t = <lfs_field>.
+*              me->populate_info_obj(
+*                EXPORTING
+*                  iv_fieldname = gc_fn_9amatnr
+*                  iv_val_frm   = lv_sel_f
+*                  iv_val_to    = lv_sel_t
+*                  ).
+*            ENDIF.
+*
+*          ENDIF.
+        WHEN 'ECCSHP-AAG_CSTBLCK'.
+          CLEAR lv_saleorg.
+          lv_saleorg = <gfs_cvc>-p_saleorg.
+          CALL FUNCTION 'CONVERSION_EXIT_ALPHA_OUTPUT'
+            EXPORTING
+              input  = <gfs_cvc>-p_saleorg
+            IMPORTING
+              output = lv_saleorg.
+          SORT gt_custblk_rule BY kunnr vtweg vkorg spart. " added By Chiranjeevi
+          READ TABLE gt_custblk_rule INTO gw_custblk_rule WITH KEY kunnr = <gfs_cvc>-p_eccshp
+                                                                   vtweg = <gfs_cvc>-p_dc
+                                                                   vkorg = lv_saleorg
+                                                                   spart = <gfs_cvc>-p_div BINARY SEARCH." added by chiranjeevi
+          IF sy-subrc = 0.
+            IF ( gw_custblk_rule-loevm IS NOT INITIAL OR
+               gw_custblk_rule-lifsd IS NOT INITIAL OR
+               gw_custblk_rule-faksd IS NOT INITIAL OR
+               gw_custblk_rule-aufsd IS NOT INITIAL OR
+               gw_custblk_rule-cassd IS NOT INITIAL ).
+*              IF <gfs_cvc>-p_aag NE 'ND'.
+              lv_prop_val = 'ND'.
+*              ENDIF.
+            ELSE.
+*              IF <gfs_cvc>-p_aag NE 'PD'.
+              lv_prop_val = 'PC'.
+*              ENDIF.
+            ENDIF.
+          ENDIF.
+          IF lv_prop_val IS NOT INITIAL AND <gfs_cvc> IS ASSIGNED.
+            UNASSIGN <lfs_fin>.
+            APPEND INITIAL LINE TO gt_final ASSIGNING <lfs_fin>.
+            IF <lfs_fin> IS ASSIGNED.
+              MOVE-CORRESPONDING <gfs_cvc> TO <lfs_fin>.
+              <lfs_fin>-rule = me->gv_rule_name.
+              <lfs_fin>-prop_val = lv_prop_val.
+            ENDIF.
+          ENDIF.
+*          APPEND LINES OF gt_final TO gt_final1.
+*          IF p_exec IS NOT INITIAL AND lv_prop_val IS NOT INITIAL.
+*            lv_sel_f = <gfs_cvc>-p_aag.
+*            lv_sel_t = lv_prop_val.
+*            me->populate_info_obj(
+*              EXPORTING
+*                iv_fieldname = gc_fn_p_aag
+*                iv_val_frm   = lv_sel_f
+*                iv_val_to    = lv_sel_t
+*            ).
+*
+*            lv_sel_f = lv_sel_t = <gfs_cvc>-p_div.
+*            me->populate_info_obj(
+*              EXPORTING
+*                iv_fieldname = gc_fn_p_div
+*                iv_val_frm   = lv_sel_f
+*                iv_val_to    = lv_sel_t
+*            ).
+*
+*            lv_sel_f = lv_sel_t = <gfs_cvc>-p_dc.
+*            me->populate_info_obj(
+*              EXPORTING
+*                iv_fieldname = gc_fn_p_dc
+*                iv_val_frm   = lv_sel_f
+*                iv_val_to    = lv_sel_t
+*            ).
+*
+**            lv_sel_f = lv_sel_t = <gfs_cvc>-p_eccshp.
+**            me->populate_info_obj(
+**              EXPORTING
+**                iv_fieldname = gc_fn_p_eccshp
+**                iv_val_frm   = lv_sel_f
+**                iv_val_to    = lv_sel_t
+**            ).
+*
+*            lv_sel_f = lv_sel_t = <gfs_cvc>-p_saleorg.
+*            me->populate_info_obj(
+*              EXPORTING
+*                iv_fieldname = gc_fn_p_saleorg
+*                iv_val_frm   = lv_sel_f
+*                iv_val_to    = lv_sel_t
+*            ).
+*
+*            ASSIGN COMPONENT gc_fn_p_eccshp OF STRUCTURE <gfs_cvc> TO <lfs_field>.
+*            lv_sel_f = lv_sel_t = <lfs_field>.
+*            IF sy-subrc EQ 0.
+*              me->populate_info_obj(
+*                EXPORTING
+*                  iv_fieldname = gc_fn_p_eccshp
+*                  iv_val_frm   = lv_sel_f
+*                  iv_val_to    = lv_sel_t
+*                  ).
+*            ENDIF.
+*          ENDIF.
+
+        WHEN 'ECCSHP-AAG_PYBLPT'.
+          SORT gt_custblk_bp BY kunnr vtweg vkorg spart.
+          READ TABLE gt_custblk_bp INTO gw_custblk_bp WITH KEY kunnr = <gfs_cvc>-p_eccshp
+                                                               vtweg = <gfs_cvc>-p_dc
+                                                               vkorg = <gfs_cvc>-p_saleorg
+                                                               spart = <gfs_cvc>-p_div  BINARY SEARCH.
+          IF sy-subrc = 0.
+            READ TABLE gt_custblk_payer INTO gw_custblk_payer WITH KEY kunnr = gw_custblk_bp-kunn2 BINARY SEARCH.
+            IF sy-subrc = 0.
+*              IF <gfs_cvc>-p_aag NE 'PC'.
+              lv_prop_val = 'PC'.
+*              ENDIF.
+            ENDIF.
+          ENDIF.
+          IF lv_prop_val IS NOT INITIAL AND <gfs_cvc> IS ASSIGNED.
+            UNASSIGN <lfs_fin>.
+            APPEND INITIAL LINE TO gt_final ASSIGNING <lfs_fin>.
+            IF <lfs_fin> IS ASSIGNED.
+              MOVE-CORRESPONDING <gfs_cvc> TO <lfs_fin>.
+              <lfs_fin>-rule = me->gv_rule_name.
+              <lfs_fin>-prop_val = lv_prop_val.
+            ENDIF.
+          ENDIF.
+
+*        BOC BY MADHVI
+
+        WHEN 'SALES_HISTORY-AAG'.
+
+          READ TABLE gt_key_figure ASSIGNING <lfs_key_figure>
+          WITH KEY char_comb_id = <gfs_cvc>-plobj BINARY SEARCH.
+
+          IF sy-subrc = 0 AND <lfs_key_figure> IS ASSIGNED.
+
+            READ TABLE gt_key_figure_value ASSIGNING <lfs_key_figure_value>
+             WITH KEY key_figure_id = <lfs_key_figure>-key_figure_id BINARY SEARCH.
+            IF sy-subrc = 0.
+              IF <gfs_cvc>-p_aag <> 'PC' AND p_pc = 'X'.           ""  P_PC = 'X' Added By Gagan/Prashanth 17/05/2024 AD1K916929
+                lv_prop_val = 'PC'.
+              ELSE.
+                lv_prop_val = <gfs_cvc>-p_aag.
+              ENDIF.
+            ELSE.
+              IF <gfs_cvc>-p_aag <> 'ND' AND p_nd = 'X'.           ""  P_ND = 'X' Added By Gagan/Prashanth 17/05/2024 AD1K916929
+                lv_prop_val = 'ND'.
+              ELSE.
+                lv_prop_val = <gfs_cvc>-p_aag.
+              ENDIF.
+            ENDIF.
+          ENDIF.
+
+
+          IF lv_prop_val IS NOT INITIAL AND <gfs_cvc> IS ASSIGNED.
+            UNASSIGN <lfs_fin>.
+            APPEND INITIAL LINE TO gt_final ASSIGNING <lfs_fin>.
+            IF <lfs_fin> IS ASSIGNED.
+              MOVE-CORRESPONDING <gfs_cvc> TO <lfs_fin>.
+              <lfs_fin>-rule = me->gv_rule_name.
+              <lfs_fin>-prop_val = lv_prop_val.
+            ENDIF.
+          ENDIF.
+        WHEN 'MATCLASS-AAG'.
+          CLEAR gw_mat_class.
+          READ TABLE gt_mat_class INTO gw_mat_class WITH KEY zpdi = <gfs_cvc>-p_div zgrade = <gfs_cvc>-9amatnr BINARY SEARCH.
+          IF gw_mat_class-zplnstat = 'P' AND sy-subrc = 0.
+            IF <gfs_cvc>-p_aag <> 'PC'.
+              lv_prop_val = 'PC'.
+            ELSE.
+              lv_prop_val = <gfs_cvc>-p_aag.
+            ENDIF.
+          ELSE.
+            IF <gfs_cvc>-p_aag <> 'ND'.
+              lv_prop_val = 'ND'.
+            ELSE.
+              lv_prop_val = <gfs_cvc>-p_aag.
+            ENDIF.
+          ENDIF.
+
+          IF lv_prop_val IS NOT INITIAL AND <gfs_cvc> IS ASSIGNED.
+            UNASSIGN <lfs_fin>.
+            APPEND INITIAL LINE TO gt_final ASSIGNING <lfs_fin>.
+            IF <lfs_fin> IS ASSIGNED.
+              MOVE-CORRESPONDING <gfs_cvc> TO <lfs_fin>.
+              <lfs_fin>-rule = me->gv_rule_name.
+              <lfs_fin>-prop_val = lv_prop_val.
+            ENDIF.
+          ENDIF.
+
+*          eoc by madhvi
+
+*              APPEND LINES OF gt_final TO gt_final1.
+*      IF p_exec IS NOT INITIAL AND lv_prop_val IS NOT INITIAL.
+*            lv_sel_f = <gfs_cvc>-p_aag.
+*            lv_sel_t = lv_prop_val.
+*            me->populate_info_obj(
+*              EXPORTING
+*                iv_fieldname = gc_fn_p_aag
+*                iv_val_frm   = lv_sel_f
+*                iv_val_to    = lv_sel_t
+*            ).
+*
+*            lv_sel_f = lv_sel_t = <gfs_cvc>-p_div.
+*            me->populate_info_obj(
+*              EXPORTING
+*                iv_fieldname = gc_fn_p_div
+*                iv_val_frm   = lv_sel_f
+*                iv_val_to    = lv_sel_t
+*            ).
+*
+*            lv_sel_f = lv_sel_t = <gfs_cvc>-p_dc.
+*            me->populate_info_obj(
+*              EXPORTING
+*                iv_fieldname = gc_fn_p_dc
+*                iv_val_frm   = lv_sel_f
+*                iv_val_to    = lv_sel_t
+*            ).
+*
+*            lv_sel_f = lv_sel_t = <gfs_cvc>-p_eccshp.
+*            me->populate_info_obj(
+*              EXPORTING
+*                iv_fieldname = gc_fn_p_eccshp
+*                iv_val_frm   = lv_sel_f
+*                iv_val_to    = lv_sel_t
+*            ).
+*
+*            lv_sel_f = lv_sel_t = <gfs_cvc>-p_saleorg.
+*            me->populate_info_obj(
+*              EXPORTING
+*                iv_fieldname = gc_fn_p_saleorg
+*                iv_val_frm   = lv_sel_f
+*                iv_val_to    = lv_sel_t
+*            ).
+*
+*            ASSIGN COMPONENT gc_fn_p_eccshp OF STRUCTURE <gfs_cvc> TO <lfs_field>.
+*            IF sy-subrc EQ 0.
+*              lv_sel_f = lv_sel_t = <lfs_field>.
+*              me->populate_info_obj(
+*                EXPORTING
+*                  iv_fieldname = gc_fn_p_eccshp
+*                  iv_val_frm   = lv_sel_f
+*                  iv_val_to    = lv_sel_t
+*                  ).
+*            ENDIF.
+*          ENDIF.
+
+      ENDCASE.
+
+      CASE abap_true.
+          "commented by madhvi "Uncommented by Gagan/Prashanth 13/08/2024 AD1K916997
+        WHEN p_rprt.
+          IF lv_prop_val IS NOT INITIAL AND <gfs_cvc> IS ASSIGNED.
+            UNASSIGN <lfs_fin>.
+            APPEND INITIAL LINE TO gt_final ASSIGNING <lfs_fin>.
+            IF <lfs_fin> IS ASSIGNED.
+              MOVE-CORRESPONDING <gfs_cvc> TO <lfs_fin>.
+              <lfs_fin>-rule = me->gv_rule_name.
+              <lfs_fin>-prop_val = lv_prop_val.
+            ENDIF.
+          ENDIF.
+          "commented by madhvi
+        WHEN p_exec.
+
+          IF gv_rule_name NE 'ECCSHP-AAG_MATDEL' AND gv_rule_name NE 'ECCSHP-AAG_CSTBLCK' AND gv_rule_name NE 'ECCSHP-AAG_PYBLPT'
+             AND gv_rule_name NE 'SKU-AAG' AND gv_rule_name NE 'SKU-AAG_POLY' AND gv_rule_name NE 'MATCLASS-AAG' AND
+            gv_rule_name NE 'SALES_HISTORY-AAG' .
+            me->post_realign_data( ).
+          ENDIF.
+
+          IF gv_flg_err = abap_true.
+            EXIT.
+          ENDIF.
+      ENDCASE.
+
+*      IF gv_rule_name EQ 'ECCSHP-AAG_PYBLPT' AND p_exec IS NOT INITIAL.
+*        me->execution( ).
+*      ENDIF.
+
+    ENDLOOP.
+
+*    IF lv_flag NE abap_true AND p_exec IS NOT INITIAL.
+*      IF gv_rule_name EQ 'ECCSHP-AAG_MATDEL' OR gv_rule_name EQ 'ECCSHP-AAG_CSTBLCK' OR gv_rule_name EQ 'ECCSHP-AAG_PYBLPT'
+*        OR gv_rule_name eq 'SKU-AAG' OR gv_rule_name EQ 'SKU-AAG_POLY'.
+*        me->execution( ).
+*        lv_flag = abap_true.
+*      ENDIF.
+*    ENDIF.
+
+
+*    IF gv_rule_name EQ 'ECCSHP-AAG_PYBLPT' AND p_exec IS NOT INITIAL.
+*      me->execution( ).
+*    ENDIF.
+
+
+    CASE abap_true.
+      WHEN p_exec.
+        IF gv_flg_err = abap_true.
+          RETURN.
+        ENDIF.
+        COMMIT WORK.
+    ENDCASE.
+  ENDMETHOD.                    "compare_cvc
+
+  "! This method displays the proposed values in SALV, only when the
+  "! Display Radio button has been selected in Screen.
+  METHOD display_proposed_cvc.
+    DATA:
+      lo_alv TYPE REF TO cl_salv_table,
+      lo_display TYPE REF TO cl_salv_display_settings,
+      lo_layout TYPE REF TO cl_salv_layout,
+      lo_columns TYPE REF TO cl_salv_columns_table,
+*      lo_func TYPE REF TO cl_salv_functions_list,
+      lo_events TYPE REF TO cl_salv_events_table,
+      lo_col TYPE REF TO cl_salv_column,
+      lo_sel TYPE REF TO cl_salv_selections,
+      lw_lyt_key TYPE salv_s_layout_key,
+      lv_alv_hdr TYPE lvc_title,
+      lo_strucdesc TYPE REF TO cl_abap_structdescr,
+      lt_comp TYPE abap_compdescr_tab,
+      lr_rule TYPE RANGE OF char30, "Added Vandan 10.02.2022
+      lw_rule LIKE LINE OF lr_rule.  "Added Vandan 10.02.2022
+
+    FIELD-SYMBOLS:
+      <lfs_comp> TYPE abap_compdescr,
+      <lfs_col> TYPE  /sapapo/ts_group_by_str,
+      <lfs_final> TYPE gty_final, "Added Vandan 10.02.2022
+      <lfs_final_tmp> TYPE gty_final. "Added Vandan 10.02.2022
+
+    DATA : lw_final TYPE gty_final.
+
+    IF gt_final IS INITIAL.
+      me->display_valid_grpcust( ).
+      RETURN.
+    ELSE. "Else added Vandan 10.02.2022 Vandan
+      lw_rule-sign   = 'I'.
+      lw_rule-option = 'EQ'.
+      lw_rule-low    = 'SKU-AAG'.
+      APPEND lw_rule TO lr_rule.
+      CLEAR lw_rule-low.
+      lw_rule-low = 'SKU-AAG_POLY'.
+      APPEND lw_rule TO lr_rule.
+      CLEAR lw_rule-low.
+      lw_rule-low = 'ECCSHP-AAG_MATDEL'.
+      APPEND lw_rule TO lr_rule.
+      CLEAR lw_rule-low.
+      lw_rule-low = 'ECCSHP-AAG_CSTBLCK'.
+      APPEND lw_rule TO lr_rule.
+      CLEAR lw_rule-low.
+      lw_rule-low = 'ECCSHP-AAG_PYBLPT'.
+      APPEND lw_rule TO lr_rule.
+      CLEAR lw_rule-low.
+*      boc by madhvi
+      lw_rule-low = 'SALES_HISTORY-AAG'.
+      APPEND lw_rule TO lr_rule.
+      CLEAR lw_rule-low.
+      lw_rule-low = 'MATCLASS-AAG'.
+      APPEND lw_rule TO lr_rule.
+      CLEAR lw_rule-low.
+*      eoc by madhvi
+      REFRESH gt_final_tmp[].
+      gt_final_tmp = gt_final.
+      DELETE gt_final_tmp WHERE rule NOT IN lr_rule.
+      IF gt_final_tmp[] IS NOT INITIAL.
+
+*        LOOP AT gt_final_tmp ASSIGNING <lfs_final>.
+**          IF <lfs_final>-rule EQ 'SKU-AAG' OR <lfs_final>-rule EQ 'SKU-AAG_POLY'.
+***            <lfs_final>-9amatnr = <lfs_final>-matnr.
+**          ENDIF.
+*        ENDLOOP.
+
+        SORT gt_final_tmp BY p_saleorg p_div p_dc p_eccshp 9amatnr rule plobj ."prop_val. "added plobj by madhvi
+        DELETE ADJACENT DUPLICATES FROM gt_final_tmp COMPARING p_saleorg p_div p_dc p_eccshp 9amatnr rule plobj." prop_val. "added plobj by madhvi
+*        SORT gt_final BY p_div p_dc p_eccshp p_saleorg 9amatnr rule plobj ."prop_val .  " added by Chairanjeevi "commneted by madhvi
+        LOOP AT gt_final_tmp ASSIGNING <lfs_final>.
+          "commented by madhvi
+*          CLEAR lw_final.
+*          READ TABLE gt_final INTO lw_final WITH KEY p_div       = <lfs_final>-p_div
+*                                                     p_dc        = <lfs_final>-p_dc
+*                                                     p_eccshp    = <lfs_final>-p_eccshp
+*                                                     p_saleorg   = <lfs_final>-p_saleorg
+*                                                     9amatnr     = <lfs_final>-9amatnr
+*                                                     prop_val    = 'ND' BINARY SEARCH. " Added By Chianjeevi
+*          IF sy-subrc EQ 0.
+*            <lfs_final>-prop_val = 'ND'.
+*            <lfs_final>-rule     = lw_final-rule.
+*          ELSE.
+*            <lfs_final>-prop_val = 'PC'.
+*          ENDIF.
+          "commented by madhvi
+** BOC By Chiranjeevi
+          IF <lfs_final>-prop_val NE <lfs_final>-p_aag.
+            APPEND INITIAL LINE TO gt_final_new ASSIGNING <lfs_final_tmp>.
+            <lfs_final_tmp> = <lfs_final>.
+          ENDIF.
+** EOC By Chiranjeevi
+        ENDLOOP.
+        DELETE gt_final WHERE rule IN lr_rule.
+*        APPEND LINES OF gt_final_tmp TO gt_final.
+      ENDIF.
+    ENDIF.
+** BOC By Chiranjeevi
+*    IF gt_final_tmp[] IS NOT INITIAL.
+*      LOOP AT gt_final_tmp ASSIGNING <lfs_final>.
+*        IF <lfs_final>-prop_val NE <lfs_final>-p_aag.
+*          APPEND INITIAL LINE TO gt_final ASSIGNING <lfs_final_tmp>.
+*          <lfs_final_tmp> = <lfs_final>.
+*        ENDIF.
+*      ENDLOOP.
+*    ENDIF.
+    IF gt_final_new IS NOT INITIAL.
+      APPEND LINES OF gt_final_new TO gt_final.
+    ENDIF.
+** EOC By Chiranjeevi
+
+    IF gt_final IS NOT INITIAL.
+      DELETE ADJACENT DUPLICATES FROM gt_final COMPARING prop_val 0chngid 9alocno 9amatnr p_aag p_agent p_country
+                                                         p_dc p_div p_eccshp p_grpcust p_planshp p_prodgrp p_reg_off p_saleorg
+                                                         p_sku p_sku_fbr p_sku_pfy p_sku_pty p_tertory p_segment matnr r_state r_dist_af
+                                                         r_dist_lu r_dist_pr r_region r_shpto_a r_shpto_lu r_shpto_p   . "rule
+    ENDIF.
+
+
+    IF gt_final IS INITIAL AND gt_inv_customers IS INITIAL.
+      MESSAGE 'No Proposed Value(s) Found, Master Data is correct'(021) TYPE gc_suc.
+      LEAVE LIST-PROCESSING.
+    ENDIF.
+
+    IF gt_inv_customers IS NOT INITIAL.
+      MESSAGE 'Multiple Valid Customers Found'(028) TYPE gc_info.
+    ENDIF.
+
+
+    TRY.
+
+        cl_salv_table=>factory(
+          IMPORTING
+            r_salv_table   = lo_alv    " Basis Class Simple ALV Tables
+          CHANGING
+            t_table        = gt_final
+        ).
+
+        lo_alv->set_screen_status(
+          EXPORTING
+            report        = sy-repid    " ABAP Program: Current Main Program
+            pfstatus      = 'ST_STANDARD'    " Screens, Current GUI Status
+            set_functions = lo_alv->c_functions_all    " ALV: Data Element for Constants
+        ).
+
+        lo_events = lo_alv->get_event( ).
+        SET HANDLER me->on_user_command FOR lo_events.
+
+        CONCATENATE sy-title p_mod p_bsggrp INTO lv_alv_hdr SEPARATED BY '>'.
+
+*       global display settings
+        lo_display = lo_alv->get_display_settings( ).
+*       activate strip pattern
+        lo_display->set_striped_pattern( abap_true ).
+        lo_display->set_list_header( lv_alv_hdr ).
+
+*        get alv layout
+        lo_layout = lo_alv->get_layout( ).
+        lw_lyt_key-report = sy-repid.
+        lo_layout->set_key( lw_lyt_key ).
+
+*        activate multiple row selection
+        lo_sel = lo_alv->get_selections( ).
+        lo_sel->set_selection_mode( if_salv_c_selection_mode=>row_column  ).
+
+        lo_columns = lo_alv->get_columns( ).
+
+        IF lo_columns IS BOUND.
+
+          lo_columns->set_optimize( abap_true ).
+
+          lo_col = lo_columns->get_column( gc_col_rule ).
+          lo_col->set_long_text( 'Rule Name'(003) ).
+          lo_col->set_medium_text( 'Rule Name'(003) ).
+          lo_col->set_short_text( 'Rule Name'(003) ).
+
+          lo_col = lo_columns->get_column( gc_col_propval ).
+          lo_col->set_long_text( 'Proposed Value'(004) ).
+          lo_col->set_medium_text( 'Proposed Value'(004) ).
+          lo_col->set_short_text( 'Prop. Val.'(005) ).
+
+          lo_strucdesc ?= cl_abap_typedescr=>describe_by_data( <gfs_cvc> ).
+          lt_comp = lo_strucdesc->components.
+          LOOP AT lt_comp ASSIGNING <lfs_comp>.
+*            hiding the all coulumns in output
+            lo_col = lo_columns->get_column( <lfs_comp>-name ).
+            lo_col->set_visible( abap_false ).
+
+          ENDLOOP.
+
+          SORT gt_vis_col BY table_line.
+          DELETE ADJACENT DUPLICATES FROM gt_vis_col COMPARING ALL FIELDS.
+          LOOP AT gt_vis_col ASSIGNING <lfs_col>.
+*            showing only relevent columns in output
+            gc_col_name = <lfs_col>.
+            lo_col = lo_columns->get_column( gc_col_name ).
+            lo_col->set_visible( abap_true ).
+          ENDLOOP.
+
+        ENDIF.
+        lo_alv->display( ).
+      CATCH cx_salv_msg.    " ALV: General Error Class with Message
+        MESSAGE 'Error in display SALV'(018) TYPE gc_suc DISPLAY LIKE gc_e.
+      CATCH cx_salv_not_found.
+        MESSAGE 'Error in display SALV: Column Not found'(019) TYPE gc_suc DISPLAY LIKE gc_e.
+      CATCH cx_salv_existing.    " ALV: General Error Class (Checked During Syntax Check)
+        MESSAGE 'Error in display SALV'(031) TYPE gc_suc DISPLAY LIKE gc_e.
+      CATCH cx_salv_wrong_call.    " ALV: General Error Class (Checked During Syntax Check)
+        MESSAGE 'Error in display SALV'(031) TYPE gc_suc DISPLAY LIKE gc_e.
+    ENDTRY.
+  ENDMETHOD.                    "display
+
+  "! This method fetches the master data (CVC) & also call an
+  "! RFC to get customer data
+  METHOD fetch_cvc.
+    FIELD-SYMBOLS:
+      <lfs_plob> TYPE /sapapo/ts_plob_values_ext,
+      <lfs_kunnr> TYPE gty_kna1,
+      <lfs_zapoparam> TYPE zapoparam,
+      <lfs_field> TYPE any,
+      <lfs_rfc_field> TYPE rfc_db_fld,
+      <lfs_rfc_opt> TYPE rfc_db_opt,
+      <lfs_opt> TYPE rfc_db_opt,
+      <lfs_char_comb> TYPE bapi10030pbcharcomb2o. "madhvi
+
+    DATA:
+      lw_selection TYPE /sapapo/ts_iobj_selection,
+      lt_cvc TYPE STANDARD TABLE OF gty_cvc,
+      lv_tmp_str TYPE char20,
+      lv_nrecords TYPE i,
+      gr_shptp TYPE RANGE OF /sapapo/locno,
+      gr_salesorg TYPE RANGE OF vkorg,
+      gw_shptp LIKE LINE OF gr_shptp,
+      lox_pstru TYPE REF TO /sapapo/cx_scmb_pstru,
+      lv_err_desc TYPE string.
+
+    FIELD-SYMBOLS:
+      <lfs_saleorg> LIKE LINE OF gr_salesorg,
+      <lfs_cvc>     TYPE gty_cvc.
+    DATA : lv_saleorg TYPE /bic/oip_saleorg.
+
+    "BOC Cursor Generated code
+    ""BOC BY Kalpesh/Aayush 23/12/2025 AD1K917449
+    DATA:lt_dc30_plobj    TYPE STANDARD TABLE OF /sapapo/plobj,
+         lv_dc30_plobj    TYPE /sapapo/plobj,
+         lw_plob_temp     TYPE /sapapo/ts_plob_values_ext,
+         lt_plob_filtered TYPE STANDARD TABLE OF /sapapo/ts_plob_values_ext,
+         lv_filtered_cnt  TYPE i.
+    ""EOC BY Kalpesh/Aayush 23/12/2025 AD1K917449
+    "EOC Cursor Generated code
+
+    CLEAR: gt_grpby, gt_cvc.
+*    populating the Selection & Groupby table for CVC selection
+    CASE me->gv_rule_name.
+      WHEN '9ALOCNO-EXCUS'.
+        CLEAR lw_selection.
+        lw_selection-iobjnm = gc_fn_p_dc.
+        lw_selection-sign = gc_i.
+        lw_selection-option = gc_eq.
+        lw_selection-low = gc_dc_15.
+        APPEND lw_selection TO gt_selection.
+        me->append_selfield( iv_fname = gc_fn_9alocno ).
+        me->append_selfield( iv_fname = gc_fn_p_country ).
+        me->append_selfield( iv_fname = gc_fn_p_div ).
+        me->append_selfield( iv_fname = gc_fn_p_dc ).
+      WHEN '9ALOCNO-DC65'.
+        CLEAR lw_selection.
+        lw_selection-iobjnm = gc_fn_p_dc.
+        lw_selection-sign = gc_i.
+        lw_selection-option = gc_eq.
+        lw_selection-low = gc_dc_65.
+        APPEND lw_selection TO gt_selection.
+        me->append_selfield( iv_fname = gc_fn_9alocno ).
+        me->append_selfield( iv_fname = gc_fn_p_dc ).
+        me->append_selfield( iv_fname = gc_fn_p_div ).
+      WHEN '9ALOCNO-C_CLASS'.
+        CLEAR lw_selection.
+        lw_selection-iobjnm = gc_fn_p_dc.
+        lw_selection-sign = gc_e.
+        lw_selection-option = gc_eq.
+        lw_selection-low = gc_dc_15.
+        APPEND lw_selection TO gt_selection.
+        lw_selection-low = gc_dc_65.
+        APPEND lw_selection TO gt_selection.
+        me->append_selfield( iv_fname = gc_fn_9alocno ).
+        me->append_selfield( iv_fname = gc_fn_p_div ).
+        me->append_selfield( iv_fname = gc_fn_p_grpcust ).
+        me->append_selfield( iv_fname = gc_fn_p_eccshp ).
+      WHEN '9ALOCNO-EXDEXW'.
+        CLEAR lw_selection.
+        lw_selection-iobjnm = gc_fn_p_dc.
+        lw_selection-sign = gc_e.
+        lw_selection-option = gc_eq.
+        lw_selection-low = gc_dc_15.
+        APPEND lw_selection TO gt_selection.
+        lw_selection-low = gc_dc_65.
+        APPEND lw_selection TO gt_selection.
+        me->append_selfield( iv_fname = gc_fn_9alocno ).
+        me->append_selfield( iv_fname = gc_fn_p_planshp ).
+*        me->append_selfield( iv_fname = gc_fn_p_dc ). "commeted on 16.04.2019, as not included while creating realignment step
+*        me->append_selfield( iv_fname = gc_fn_p_grpcust ). "commeted on 16.04.2019, as not included while creating realignment step
+        me->append_selfield( iv_fname = gc_fn_p_div ).
+*        me->append_selfield( iv_fname = gc_fn_p_eccshp ). "commeted on 16.04.2019, as not included while creating realignment step
+      WHEN 'PLANSHP-C_CLASS'.
+        CLEAR lw_selection.
+        lw_selection-iobjnm = gc_fn_p_dc.
+        lw_selection-sign = gc_e.
+        lw_selection-option = gc_eq.
+        lw_selection-low = gc_dc_15.
+        APPEND lw_selection TO gt_selection.
+        lw_selection-low = gc_dc_20.
+        APPEND lw_selection TO gt_selection.
+        lw_selection-low = gc_dc_25.
+        APPEND lw_selection TO gt_selection.
+        me->append_selfield( iv_fname = gc_fn_p_div ).
+        me->append_selfield( iv_fname = gc_fn_p_grpcust ).
+        me->append_selfield( iv_fname = gc_fn_p_eccshp ).
+        me->append_selfield( iv_fname = gc_fn_p_planshp ).
+      WHEN 'PLANSHP-EXD'."Added by SN Das CD:8085178
+        CLEAR lw_selection.
+        lw_selection-iobjnm = gc_fn_p_dc.
+        lw_selection-sign = gc_e.
+        lw_selection-option = gc_eq.
+        lw_selection-low = gc_dc_15.
+        APPEND lw_selection TO gt_selection.
+        lw_selection-low = gc_dc_20.
+        APPEND lw_selection TO gt_selection.
+        lw_selection-low = gc_dc_25.
+        APPEND lw_selection TO gt_selection.
+        me->append_selfield( iv_fname = gc_fn_9alocno ).
+        me->append_selfield( iv_fname = gc_fn_p_div ).
+        me->append_selfield( iv_fname = gc_fn_p_dc ).
+        me->append_selfield( iv_fname = gc_fn_p_planshp ).
+        me->append_selfield( iv_fname = gc_fn_p_eccshp ). "Added By Kalpesh/Aayush 23/12/2025 AD1K917449
+      WHEN 'PLANSHP-DC20_25'.
+        CLEAR lw_selection.
+        lw_selection-iobjnm = gc_fn_p_dc.
+        lw_selection-sign = gc_i.
+        lw_selection-option = gc_eq.
+        lw_selection-low = gc_dc_20.
+        APPEND lw_selection TO gt_selection.
+        lw_selection-low = gc_dc_25.
+        APPEND lw_selection TO gt_selection.
+        me->append_selfield( iv_fname = gc_fn_p_div ).
+        me->append_selfield( iv_fname = gc_fn_p_dc ).
+        me->append_selfield( iv_fname = gc_fn_p_eccshp ).
+        me->append_selfield( iv_fname = gc_fn_p_planshp ).
+      WHEN 'PLANSHP-EXDEXW'.
+        CLEAR lw_selection.
+        lw_selection-iobjnm = gc_fn_p_dc.
+        lw_selection-sign = gc_e.
+        lw_selection-option = gc_eq.
+        lw_selection-low = gc_dc_15.
+        APPEND lw_selection TO gt_selection.
+        lw_selection-low = gc_dc_20.
+        APPEND lw_selection TO gt_selection.
+        lw_selection-low = gc_dc_25.
+        APPEND lw_selection TO gt_selection.
+        me->append_selfield( iv_fname = gc_fn_9alocno ).
+        me->append_selfield( iv_fname = gc_fn_p_eccshp ).
+        me->append_selfield( iv_fname = gc_fn_p_planshp ).
+*        me->append_selfield( iv_fname = gc_fn_p_dc ). "commeted on 16.04.2019, as not included while creating realignment step
+        me->append_selfield( iv_fname = gc_fn_p_div ).
+        me->append_selfield( iv_fname = gc_fn_p_grpcust ).
+      WHEN 'PLANSHP-EXCUS'.
+        CLEAR lw_selection.
+        lw_selection-iobjnm = gc_fn_p_dc.
+        lw_selection-sign = gc_i.
+        lw_selection-option = gc_eq.
+        lw_selection-low = gc_dc_15.
+        APPEND lw_selection TO gt_selection.
+        CLEAR lw_selection.
+        lw_selection-iobjnm = gc_fn_p_saleorg.
+        lw_selection-sign = gc_e.
+        lw_selection-option = gc_eq.
+        lw_selection-low = gc_saleorg.
+        APPEND lw_selection TO gt_selection.
+        me->append_selfield( iv_fname = gc_fn_p_div ).
+        me->append_selfield( iv_fname = gc_fn_p_planshp ).
+        me->append_selfield( iv_fname = gc_fn_p_dc ).
+        me->append_selfield( iv_fname = gc_fn_p_country ).
+        me->append_selfield( iv_fname = gc_fn_p_saleorg ).
+      WHEN 'PLANSHPPOLY-EXCUS'.
+        CLEAR lw_selection.
+        lw_selection-iobjnm = gc_fn_p_dc.
+        lw_selection-sign = gc_i.
+        lw_selection-option = gc_eq.
+        lw_selection-low = gc_dc_15.
+        APPEND lw_selection TO gt_selection.
+        CLEAR lw_selection.
+        lw_selection-iobjnm = gc_fn_p_saleorg.
+        lw_selection-sign = gc_e.
+        lw_selection-option = gc_eq.
+        lw_selection-low = gc_saleorg.
+        APPEND lw_selection TO gt_selection.
+        me->append_selfield( iv_fname = gc_fn_p_div ).
+        me->append_selfield( iv_fname = gc_fn_p_planshp ).
+        me->append_selfield( iv_fname = gc_fn_p_dc ).
+        me->append_selfield( iv_fname = gc_fn_p_country ).
+        me->append_selfield( iv_fname = gc_fn_p_saleorg ).
+      WHEN 'PLANSHP-TNTVEXCUS' OR 'PLANSHPPOLY-TNTVEXCUS'.
+        CLEAR lw_selection.
+        lw_selection-iobjnm = gc_fn_p_dc.
+        lw_selection-sign = gc_i.
+        lw_selection-option = gc_eq.
+        lw_selection-low = gc_dc_15.
+        APPEND lw_selection TO gt_selection.
+        CLEAR lw_selection.
+        lw_selection-iobjnm = gc_fn_p_saleorg.
+        lw_selection-sign = gc_i.
+        lw_selection-option = gc_eq.
+        lw_selection-low = gc_saleorg.
+        APPEND lw_selection TO gt_selection.
+        me->append_selfield( iv_fname = gc_fn_p_div ).
+        me->append_selfield( iv_fname = gc_fn_p_planshp ).
+        me->append_selfield( iv_fname = gc_fn_p_dc ).
+        me->append_selfield( iv_fname = gc_fn_p_country ).
+        me->append_selfield( iv_fname = gc_fn_p_saleorg ).
+      WHEN 'SKU-SKU'.
+        me->append_selfield( iv_fname = gc_fn_p_div ).
+        READ TABLE gt_zapoparam ASSIGNING <lfs_zapoparam>
+            WITH KEY param3 = gc_param3_mpos param4 = p_bsggrp.
+        IF sy-subrc = 0 AND <lfs_zapoparam>-value2 IS NOT INITIAL.
+          gv_fn_mat_sku = <lfs_zapoparam>-value2.
+          me->append_selfield( iv_fname = gv_fn_mat_sku ).
+        ELSE.
+          gv_fn_mat_sku = gc_fn_p_sku.
+          me->append_selfield( iv_fname = gc_fn_p_sku ).
+        ENDIF.
+      WHEN '9AMATNR-MAT'.
+        me->append_selfield( iv_fname = gc_fn_p_div ).
+        me->append_selfield( iv_fname = gc_fn_9amatnr ).
+        READ TABLE gt_zapoparam ASSIGNING <lfs_zapoparam>
+            WITH KEY param3 = gc_param3_mpos param4 = p_bsggrp.
+        IF sy-subrc = 0 AND <lfs_zapoparam>-value2 IS NOT INITIAL.
+          gv_fn_mat_sku = <lfs_zapoparam>-value2.
+          me->append_selfield( iv_fname = gv_fn_mat_sku ).
+        ELSE.
+          gv_fn_mat_sku = gc_fn_p_sku.
+          me->append_selfield( iv_fname = gc_fn_p_sku ).
+        ENDIF.
+      WHEN 'TERTORY-TERRITORY'.
+        me->append_selfield( iv_fname = gc_fn_p_div ).
+        me->append_selfield( iv_fname = gc_fn_p_eccshp ).
+        me->append_selfield( iv_fname = gc_fn_p_agent ).
+        me->append_selfield( iv_fname = gc_fn_p_prodgrp ).
+        me->append_selfield( iv_fname = gc_fn_p_tertory ).
+      WHEN 'REGOFF-REGOFF'.
+        me->append_selfield( iv_fname = gc_fn_p_div ).
+        me->append_selfield( iv_fname = gc_fn_p_eccshp ).
+        me->append_selfield( iv_fname = gc_fn_p_agent ).
+        me->append_selfield( iv_fname = gc_fn_p_prodgrp ).
+        me->append_selfield( iv_fname = gc_fn_p_reg_off ).
+      WHEN 'GC-GRPCUS'.
+        me->append_selfield( iv_fname = gc_fn_p_grpcust ).
+        me->append_selfield( iv_fname = gc_fn_p_eccshp ).
+        me->append_selfield( iv_fname = gc_fn_p_saleorg ).
+        me->append_selfield( iv_fname = gc_fn_p_dc ).
+        me->append_selfield( iv_fname = gc_fn_p_div ).
+      WHEN 'SOLDTO-SPLTP'.
+        me->append_selfield( iv_fname = gc_fn_p_planshp ).
+        me->append_selfield( iv_fname = gc_fn_p_eccshp ).
+        me->append_selfield( iv_fname = gc_fn_p_saleorg ).
+        me->append_selfield( iv_fname = gc_fn_p_dc ).
+        me->append_selfield( iv_fname = gc_fn_p_div ).
+      WHEN 'PLANSHPPOLY-C_CLASS' OR 'PLANSHP-RESIN'.
+        CLEAR lw_selection.
+        lw_selection-iobjnm = gc_fn_p_dc.
+        lw_selection-sign = gc_e.
+        lw_selection-option = gc_eq.
+        lw_selection-low = gc_dc_15.
+        APPEND lw_selection TO gt_selection.
+        lw_selection-low = gc_dc_20.
+        APPEND lw_selection TO gt_selection.
+        lw_selection-low = gc_dc_25.
+        APPEND lw_selection TO gt_selection.
+        me->append_selfield( iv_fname = gc_fn_p_div ).
+        me->append_selfield( iv_fname = gc_fn_p_grpcust ).
+        me->append_selfield( iv_fname = gc_fn_p_eccshp ).
+        me->append_selfield( iv_fname = gc_fn_p_planshp ).
+      WHEN 'PRDGRP-PSKU_PRDGRP'.
+        READ TABLE gt_zapoparam ASSIGNING <lfs_zapoparam>
+            WITH KEY param3 = gc_param3_mpos param4 = p_bsggrp.
+        IF sy-subrc = 0 AND <lfs_zapoparam>-value2 IS NOT INITIAL.
+          gv_fn_mat_sku = <lfs_zapoparam>-value2.
+          me->append_selfield( iv_fname = gv_fn_mat_sku ).
+        ELSE.
+          gv_fn_mat_sku = gc_fn_p_sku.
+          me->append_selfield( iv_fname = gc_fn_p_sku ).
+        ENDIF.
+        me->append_selfield( iv_fname = gc_fn_p_div ).
+        me->append_selfield( iv_fname = gc_fn_p_prodgrp ).
+      WHEN 'P_SKU-DOMR_EXE'.
+        READ TABLE gt_zapoparam ASSIGNING <lfs_zapoparam>
+            WITH KEY param3 = gc_param3_mpos param4 = p_bsggrp.
+        IF sy-subrc = 0 AND <lfs_zapoparam>-value2 IS NOT INITIAL.
+          gv_fn_mat_sku = <lfs_zapoparam>-value2.
+          me->append_selfield( iv_fname = gv_fn_mat_sku ).
+        ELSE.
+          gv_fn_mat_sku = gc_fn_p_sku.
+          me->append_selfield( iv_fname = gc_fn_p_sku ).
+        ENDIF.
+        me->append_selfield( iv_fname = gc_fn_p_div ).
+        me->append_selfield( iv_fname = gc_fn_p_dc ).
+        me->append_selfield( iv_fname = gc_fn_9alocno )."Added by KPIT_091 on 04-04-2019
+      WHEN 'R_STATE-STATE' OR 'R_STATE-STATE_IN' OR'R_REGION-REGION' OR 'R_DISTRICT-DISTRICT'.
+        CLEAR: gt_selection.
+        me->append_selfield( iv_fname = gc_fn_r_state ).
+        me->append_selfield( iv_fname = gc_fn_r_region ).
+        READ TABLE gt_zapoparam ASSIGNING <lfs_zapoparam>
+            WITH KEY param3 = gc_param3_mpos param4 = p_bsggrp.
+        IF sy-subrc = 0.
+          gv_fn_sp = <lfs_zapoparam>-value3.
+          me->append_selfield( iv_fname = gv_fn_sp ).
+          gv_fn_dist = <lfs_zapoparam>-value4.
+          me->append_selfield( iv_fname = gv_fn_dist ).
+        ENDIF.
+**********************************************************************
+*    BOC: KPIT_090
+*    TR: AD1K909543
+**********************************************************************
+
+      WHEN 'SKU-AAG'.
+        me->append_selfield( iv_fname = gc_fn_p_div ).
+        me->append_selfield( iv_fname = gc_fn_p_dc ).      "Added Vandan 10.02.2022
+        me->append_selfield( iv_fname = gc_fn_p_eccshp ).  "Added Vandan 10.02.2022
+        me->append_selfield( iv_fname = gc_fn_p_saleorg ). "Added Vandan 10.02.2022
+        READ TABLE gt_zapoparam ASSIGNING <lfs_zapoparam>
+            WITH KEY param3 = gc_param3_mpos param4 = p_bsggrp.
+        IF sy-subrc = 0 AND <lfs_zapoparam>-value2 IS NOT INITIAL.
+          gv_fn_mat_sku = <lfs_zapoparam>-value2.
+*          me->append_selfield( iv_fname = gv_fn_mat_sku )."commented by Hiral on 28.07.2022
+          me->append_selfield( iv_fname = gc_fn_9amatnr )."added by Hiral on 28.07.2022
+        ELSE.
+          gv_fn_mat_sku = gc_fn_p_sku.
+*          me->append_selfield( iv_fname = gc_fn_p_sku ).
+          me->append_selfield( iv_fname = gc_fn_9amatnr   ).
+        ENDIF.
+        me->append_selfield( iv_fname = gc_fn_p_aag )..
+*        me->append_selfield( iv_fname = gc_fn_9alocno ). " Added By chiranjeevi
+*BOC by naveen on 20-05-2020
+      WHEN 'SKU-AAG_POLY'.
+*        me->append_selfield( iv_fname = gc_fn_9alocno ).
+        me->append_selfield( iv_fname = gc_fn_p_div ).
+        me->append_selfield( iv_fname = gc_fn_p_dc ).      "Added Vandan 10.02.2022
+        me->append_selfield( iv_fname = gc_fn_p_eccshp ).  "Added Vandan 10.02.2022
+        me->append_selfield( iv_fname = gc_fn_p_saleorg ). "Added Vandan 10.02.2022
+        READ TABLE gt_zapoparam ASSIGNING <lfs_zapoparam>
+            WITH KEY param3 = gc_param3_mpos param4 = p_bsggrp.
+        IF sy-subrc = 0 AND <lfs_zapoparam>-value2 IS NOT INITIAL.
+          gv_fn_mat_sku = <lfs_zapoparam>-value2.
+          " me->append_selfield( iv_fname = gv_fn_mat_sku )."commented by hiral on 28.07.2022
+          me->append_selfield( iv_fname = gc_fn_9amatnr   )."Added by Hiral on 28.07.2022
+        ELSE.
+          gv_fn_mat_sku = gc_fn_p_sku.
+*          me->append_selfield( iv_fname = gc_fn_p_sku )."commented by hiral on 28.07.2022
+          me->append_selfield( iv_fname = gc_fn_9amatnr   ).
+        ENDIF.
+        me->append_selfield( iv_fname = gc_fn_p_aag ).
+*        me->append_selfield( iv_fname = gc_fn_p_eccshp ).
+
+        gs_read_opt-flg_dont_add_nav_attributes = abap_true.
+*EOC by naveen on 20-05-2020
+*        me->append_selfield( iv_fname = gc_fn_9alocno ). " Added By chiranjeevi
+
+      WHEN 'TERTORY-DIV_SHP'.
+        me->append_selfield( iv_fname = gc_fn_p_div ).
+        me->append_selfield( iv_fname = gc_fn_p_eccshp ).
+        me->append_selfield( iv_fname = gc_fn_p_tertory ).
+*        SORT gt_tercust BY zpdi zpaposhp.                                " Commented by KPIT_095 TR: AD1K912123
+        SORT gt_tercust BY zpdi zpaposhp ASCENDING created_on DESCENDING. "Added by KPIT_095 TR: AD1K912123
+      WHEN 'TERTORY-DIV_SHP_AGNT'.
+        me->append_selfield( iv_fname = gc_fn_p_div ).
+        me->append_selfield( iv_fname = gc_fn_p_eccshp ).
+        me->append_selfield( iv_fname = gc_fn_p_agent ).
+        me->append_selfield( iv_fname = gc_fn_p_tertory ).
+        SORT gt_tercust BY zpdi zagent zpaposhp.
+      WHEN 'TERTORY-DIV_SHP_PG'.
+        me->append_selfield( iv_fname = gc_fn_p_div ).
+        me->append_selfield( iv_fname = gc_fn_p_eccshp ).
+        me->append_selfield( iv_fname = gc_fn_p_prodgrp ).
+        me->append_selfield( iv_fname = gc_fn_p_tertory ).
+        SORT gt_tercust BY zpdi zpaposhp zprodgrp.
+      WHEN 'REGOFF-DIV_SHP'.
+        me->append_selfield( iv_fname = gc_fn_p_div ).
+        me->append_selfield( iv_fname = gc_fn_p_eccshp ).
+        me->append_selfield( iv_fname = gc_fn_p_reg_off ).
+*        SORT gt_tercust BY zpdi zpaposhp.                                 " Commented by KPIT_095 TR: AD1K912123
+        SORT gt_tercust BY zpdi zpaposhp ASCENDING created_on DESCENDING.  "Added by KPIT_095 TR: AD1K912123
+      WHEN 'REGOFF-DIV_SHP_AGNT'.
+        me->append_selfield( iv_fname = gc_fn_p_div ).
+        me->append_selfield( iv_fname = gc_fn_p_eccshp ).
+        me->append_selfield( iv_fname = gc_fn_p_agent ).
+        me->append_selfield( iv_fname = gc_fn_p_reg_off ).
+        SORT gt_tercust BY zpdi zagent zpaposhp.
+      WHEN 'REGOFF-DIV_SHP_PG'.
+        me->append_selfield( iv_fname = gc_fn_p_div ).
+        me->append_selfield( iv_fname = gc_fn_p_eccshp ).
+        me->append_selfield( iv_fname = gc_fn_p_prodgrp ).
+        me->append_selfield( iv_fname = gc_fn_p_reg_off ).
+        SORT gt_tercust BY zpdi zpaposhp zprodgrp.
+
+**********************************************************************
+*    EOC: KPIT_090
+**********************************************************************
+
+*boc:KPIT_090, TR- AD1K910455, On 14.02.2019
+      WHEN 'DC-AAG'.
+        me->append_selfield( iv_fname = gc_fn_p_dc ).
+        me->append_selfield( iv_fname = gc_fn_p_aag ).
+        me->append_selfield( iv_fname = gc_fn_p_div ). "added by naveen
+*eoc: KPIT_090, TR- AD1K910455, On 14.02.2019
+      WHEN 'SEG-SEG'.
+        me->append_selfield( iv_fname = gc_fn_p_div ).
+        me->append_selfield( iv_fname = gc_fn_p_saleorg ).
+        me->append_selfield( iv_fname = gc_fn_p_grpcust ).
+        me->append_selfield( iv_fname = gc_fn_p_segment ).
+      WHEN 'ECCSHP-AAG_MATDEL' OR 'ECCSHP-AAG_CSTBLCK' OR 'ECCSHP-AAG_PYBLPT' OR 'ECCSHP-AAG_ECCMRP'. "Added Block Vandan 07.02.2022
+        me->append_selfield( iv_fname = gc_fn_p_eccshp  ).
+        me->append_selfield( iv_fname = gc_fn_p_saleorg ).
+        me->append_selfield( iv_fname = gc_fn_p_dc      ).
+        me->append_selfield( iv_fname = gc_fn_p_div     ).
+        me->append_selfield( iv_fname = gc_fn_9amatnr   ).
+*        me->append_selfield( iv_fname = gc_fn_p_sku   ).
+        me->append_selfield( iv_fname = gc_fn_p_aag     ).
+*        me->append_selfield( iv_fname = gc_fn_9alocno ). " Added By chiranjeevi
+
+*        boc by madhvi
+      WHEN 'MATCLASS-AAG'.
+        me->append_selfield( iv_fname = gc_fn_p_div ).
+        me->append_selfield( iv_fname = gc_fn_9amatnr ).
+        me->append_selfield( iv_fname = gc_fn_p_aag ).
+*        eoc by madhvi
+        "SOC Madhvi 8/3/24
+      WHEN 'SALES_HISTORY-AAG'.
+        FIELD-SYMBOLS: <lfs_div> TYPE  gty_zbgdiv,
+                       <lfs_selection_bapi> TYPE bapi10030pbselection.
+
+        LOOP AT gt_div ASSIGNING <lfs_div>.
+          UNASSIGN <lfs_selection_bapi>.
+          APPEND INITIAL LINE TO gt_selection_bapi ASSIGNING <lfs_selection_bapi>.
+          IF <lfs_selection_bapi> IS ASSIGNED.
+            <lfs_selection_bapi>-characteristic_name = gc_fn_p_div.
+            <lfs_selection_bapi>-char_val_sign = gc_i.
+            <lfs_selection_bapi>-char_val_option = gc_eq.
+            <lfs_selection_bapi>-char_val_low = <lfs_div>-div  .
+
+          ENDIF.
+        ENDLOOP.
+        "commented by madhvi
+*        me->append_selfield_bapi( iv_fname = gc_fn_p_div ).
+*        me->append_selfield_bapi( iv_fname = gc_fn_9alocno ).
+*        me->append_selfield_bapi( iv_fname = gc_fn_9amatnr   ).
+*        me->append_selfield_bapi( iv_fname = gc_fn_p_dc      ).
+*        me->append_selfield_bapi( iv_fname = gc_fn_p_eccshp  ).
+*        me->append_selfield_bapi( iv_fname = gc_fn_p_reg_off ).
+*        me->append_selfield_bapi( iv_fname = gc_fn_p_aag ).
+        "eoc commented by madhvi
+*    boc by madhvi
+
+*        CLEAR ls_key_figure_selection.
+*        ls_key_figure_selection-KEY_FIGURE = gws_apoparam-VALUE4.
+*        APPEND LS_KEY_FIGURE_SELECTION to LT_KEY_FIGURE_SELECTION.
+
+        CLEAR ls_read_options.
+        ls_read_options-max_number_of_char_combs = '0'.
+        ls_read_options-no_zero_values_flag = 'X'.
+        ls_read_options-no_initial_values_flag = 'X'.
+        APPEND ls_read_options TO lt_read_options.
+
+        lt_date_from = s_date-low.
+        ls_date_to = s_date-high.
+        CONCATENATE lt_date_from+4(2) lt_date_from+0(4) INTO lv_dat_f SEPARATED BY '.'.
+        CONCATENATE ls_date_to+4(2) ls_date_to+0(4) INTO lv_dat_t SEPARATED BY '.'.
+*eoc by madhvi
+
+    ENDCASE.
+
+
+    "SOC Madhvi 8/3/24
+    CASE me->gv_rule_name.
+      WHEN 'SALES_HISTORY-AAG'.
+
+        SELECT param1 param2 param3 param4 param5 value1
+                 value2 value3 value4 value5 FROM zapoparam INTO gw_apoparam UP TO 1 ROWS
+                 WHERE param1 = p_mod AND param2 = gc_param2
+                 AND param3 = p_bsggrp AND param4 = gc_param4 AND value1 = gc_value1
+                 AND value2 = gc_value2.
+        ENDSELECT.
+*          madhvi on 22.05.2024
+
+        SELECT param1 param2 param3 param4 param5 value1
+               value2 value3 value4 FROM zapoparam INTO gws_apoparam UP TO 1 ROWS
+               WHERE param1 = p_mod AND param2 = gc_param2
+               AND param3 = p_bsggrp AND param4 = gc_param4_groupby AND value1 IN lt_value1_range
+               AND value2 IN lt_value2_range AND value3 IN lt_value3_range.
+
+          IF sy-subrc = 0.
+            " Populate the key figure selection table with VALUE4
+*            CLEAR ls_key_figure_selection.
+
+            ls_key_figure_selection-key_figure = gws_apoparam-value4.
+            APPEND ls_key_figure_selection TO lt_key_figure_selection.
+
+            SPLIT gws_apoparam-value1 AT ',' INTO TABLE lt_values.
+            LOOP AT lt_values INTO lv_value.
+              CLEAR ls_value1_range.
+              ls_value1_range-sign = 'I'.
+              ls_value1_range-option = 'EQ'.
+              ls_value1_range-low = lv_value.
+              APPEND ls_value1_range TO lt_value1_range.
+
+            ENDLOOP.
+
+* Split and populate for VALUE2
+            SPLIT gws_apoparam-value2 AT ',' INTO TABLE lt_values.
+            LOOP AT lt_values INTO lv_value.
+              CLEAR ls_value2_range.
+              ls_value2_range-sign = 'I'.
+              ls_value2_range-option = 'EQ'.
+              ls_value2_range-low = lv_value.
+              APPEND ls_value2_range TO lt_value2_range.
+
+            ENDLOOP.
+
+* Split and populate for VALUE3
+            SPLIT gws_apoparam-value3 AT ',' INTO TABLE lt_values.
+            LOOP AT lt_values INTO lv_value.
+              CLEAR ls_value3_range.
+              ls_value3_range-sign = 'I'.
+              ls_value3_range-option = 'EQ'.
+              ls_value3_range-low = lv_value.
+              APPEND ls_value3_range TO lt_value3_range.
+            ENDLOOP.
+
+            LOOP AT lt_value1_range INTO ls_value1_range.
+              CLEAR ls_combined.
+              ls_combined-new_field = ls_value1_range-low.
+              APPEND ls_combined TO lt_combined.
+            ENDLOOP.
+
+* Combine lt_value2_range
+            LOOP AT lt_value2_range INTO ls_value2_range.
+              CLEAR ls_combined.
+              ls_combined-new_field = ls_value2_range-low.
+              APPEND ls_combined TO lt_combined.
+            ENDLOOP.
+
+* Combine lt_value3_range
+            LOOP AT lt_value3_range INTO ls_value3_range.
+              CLEAR ls_combined.
+              ls_combined-new_field = ls_value3_range-low.
+              APPEND ls_combined TO lt_combined.
+            ENDLOOP.
+          ENDIF.
+          "eoc by madhvi on 22.05.2024
+
+        ENDSELECT.
+        IF sy-subrc = 0.
+
+          CALL FUNCTION 'BAPI_PBSRVAPS_GETDETAIL2'
+            EXPORTING
+              planningbook                = gw_apoparam-value4
+              data_view                   = gw_apoparam-value5
+              planning_version            = gc_planning_version
+*             SELECTION_ID                =
+              read_options                = ls_read_options
+              period_type                 = gc_period_type
+              date_from                   = lv_dat_f
+              date_to                     = lv_dat_t
+            IMPORTING
+              number_of_char_combs        = me->gw_char_comb
+            TABLES
+              selection                   = me->gt_selection_bapi
+              group_by                    = lt_combined"me->gt_group_by
+              key_figure_selection        = lt_key_figure_selection
+              key_figure                  = me->gt_key_figure
+              key_figure_value            = me->gt_key_figure_value
+              characteristics_combination = me->gt_characteristics_combination
+              return                      = gt_return
+*             EXTENSION_IN                =
+*             EXTENSION_OUT               =
+            .
+*
+          READ TABLE gt_return INTO gw_return  WITH KEY type = gc_e.
+          IF sy-subrc = 0 OR gw_char_comb = 0.
+            MESSAGE text-042 TYPE gc_suc DISPLAY LIKE gc_e.
+            EXIT.
+          ELSE.
+*            APPEND LINES OF GT_GROUP_BY TO gt_vis_col.
+            APPEND LINES OF lt_combined TO gt_vis_col.
+          ENDIF.
+          SORT gt_key_figure BY char_comb_id.
+          SORT gt_key_figure_value BY key_figure_id.
+          LOOP AT gt_characteristics_combination ASSIGNING <lfs_char_comb> .
+            AT NEW char_comb_id.
+              APPEND INITIAL LINE TO gt_cvc ASSIGNING <gfs_cvc>.
+              <gfs_cvc>-plobj = <lfs_char_comb>-char_comb_id.
+              CONDENSE <gfs_cvc>-plobj.
+            ENDAT.
+            IF <gfs_cvc> IS ASSIGNED.
+              ASSIGN COMPONENT <lfs_char_comb>-characteristic_name OF STRUCTURE <gfs_cvc> TO <lfs_field>.
+              IF <lfs_field> IS ASSIGNED.
+                <lfs_field> = <lfs_char_comb>-characteristic_value.
+              ENDIF.
+              UNASSIGN <lfs_field>.
+            ENDIF.
+          ENDLOOP .
+          UNASSIGN <gfs_cvc>.
+        ENDIF.
+
+*eoc by madhvi
+
+      WHEN OTHERS.
+        TRY .
+            me->go_plob->get_plobs(
+                  EXPORTING
+                    iv_bas_plobid      = gv_plobid    " Planning Object Structure ID
+                    it_selection       = me->gt_selection    " Ref. Structure for Selection Conditions for Characteristics
+                    it_group_by        = me->gt_grpby    " Table Type: Group by Characteristics
+                    is_read_options    = gs_read_opt
+                  IMPORTING
+                    et_plob_values     = gt_plob_values    " Table of characteristic values for planning object (PlOb)
+            ).
+            APPEND LINES OF gt_grpby TO gt_vis_col.
+          CATCH /sapapo/cx_scmb_pstru INTO lox_pstru.    " Exception Class: Planning Object Structure
+
+            lv_err_desc = lox_pstru->get_text( ).
+
+            gv_flg_err = abap_true.
+            me->append_log(
+              EXPORTING
+                iv_status      = 'Error'(010)
+                iv_err_desc    = lv_err_desc
+            ).
+            LOOP AT gt_zapoparam_rule ASSIGNING <lfs_zapoparam> WHERE active_flag = abap_true.
+              IF me->gv_rule_name CS <lfs_zapoparam>-value1 AND me->gv_rule_name CS <lfs_zapoparam>-value2.
+                CONTINUE.
+              ENDIF.
+              CONCATENATE <lfs_zapoparam>-value1 <lfs_zapoparam>-value2 INTO me->gv_rule_name SEPARATED BY gc_sprtr.
+              me->append_log(
+                EXPORTING
+                  iv_status      = 'Pending'(011)
+              ).
+            ENDLOOP.
+        ENDTRY.
+    ENDCASE.
+
+    "BOC Cursor Generated code
+    ""BOC BY Kalpesh/Aayush 23/12/2025 AD1K917449
+*    Only for GATP mode and specific rules
+    IF p_mod = 'GATP'.
+      " Initialize
+      CLEAR: lt_dc30_plobj, lt_plob_filtered, lv_filtered_cnt.
+      " Step 1: Identify planning objects with DC = 30
+      LOOP AT gt_plob_values INTO lw_plob_temp
+        WHERE iobjnm = 'P_DC'
+          AND chavl = '30'.
+        lv_dc30_plobj = lw_plob_temp-plobj.
+        APPEND lv_dc30_plobj TO lt_dc30_plobj.
+      ENDLOOP.
+
+      " Step 2: Remove duplicates and sort for binary search
+      IF lt_dc30_plobj IS NOT INITIAL.
+        SORT lt_dc30_plobj.
+        DELETE ADJACENT DUPLICATES FROM lt_dc30_plobj.
+
+        " Step 3: Build filtered table (exclude DC 30 planning objects)
+        SORT gt_plob_values BY plobj.
+
+        LOOP AT gt_plob_values INTO lw_plob_temp.
+          " Check if current PLOBJ is in exclusion list
+          READ TABLE lt_dc30_plobj WITH KEY table_line = lw_plob_temp-plobj
+            BINARY SEARCH TRANSPORTING NO FIELDS.
+
+          " If not found in exclusion list, keep the entry
+          IF sy-subrc <> 0.
+            APPEND lw_plob_temp TO lt_plob_filtered.
+          ENDIF.
+        ENDLOOP.
+
+        " Step 4: Replace original table with filtered table
+        CLEAR : gt_plob_values[].
+        gt_plob_values[] = lt_plob_filtered[].
+      ENDIF.
+    ENDIF.
+    ""EOC BY Kalpesh/Aayush 23/12/2025 AD1K917449
+    "EOC Cursor Generated code
+*    converting the fetched plob to cvc internal table format
+    LOOP AT gt_plob_values ASSIGNING <lfs_plob>.
+      AT NEW plobj.
+        UNASSIGN <gfs_cvc>.
+        APPEND INITIAL LINE TO gt_cvc ASSIGNING <gfs_cvc>.
+      ENDAT.
+      IF <gfs_cvc> IS ASSIGNED.
+        UNASSIGN <lfs_field>.
+        ASSIGN COMPONENT <lfs_plob>-iobjnm OF STRUCTURE <gfs_cvc> TO <lfs_field>.
+        IF <lfs_field> IS ASSIGNED.
+          <lfs_field> = <lfs_plob>-chavl.
+        ENDIF.
+      ENDIF.
+      AT END OF plobj.
+        IF <gfs_cvc> IS ASSIGNED.
+          READ TABLE gt_zapoparam ASSIGNING <lfs_zapoparam>
+            WITH KEY param3 = gc_param3_mpos param4 = p_bsggrp.
+          IF sy-subrc = 0 AND <lfs_zapoparam>-value2 IS NOT INITIAL.
+            gv_fn_mat_sku = <lfs_zapoparam>-value2.
+            UNASSIGN <lfs_field>.
+            ASSIGN COMPONENT gv_fn_mat_sku OF STRUCTURE <gfs_cvc> TO <lfs_field>.
+            IF <lfs_field> IS ASSIGNED.
+              <gfs_cvc>-matnr = <lfs_field>.
+            ENDIF.
+          ELSE.
+            gv_fn_mat_sku = gc_fn_p_sku.
+            <gfs_cvc>-matnr = <gfs_cvc>-p_sku.
+          ENDIF.
+          CASE me->gv_rule_name.
+            WHEN 'PLANSHPPOLY-C_CLASS'.
+              CLEAR gw_cus.
+              gw_cus-sign = gc_i.
+              gw_cus-option = gc_eq.
+              gw_cus-low = <gfs_cvc>-p_eccshp.
+              APPEND gw_cus TO gr_cus.
+              CLEAR gw_shptp.
+              gw_shptp-sign = gc_i.
+              gw_shptp-option = gc_eq.
+              gw_shptp-low = <lfs_field>.
+              APPEND gw_shptp TO gr_shptp.
+            WHEN 'R_STATE-STATE' OR 'R_STATE-STATE_IN'.
+              ASSIGN COMPONENT gv_fn_sp OF STRUCTURE <gfs_cvc> TO <lfs_field>.
+              IF <lfs_field> IS ASSIGNED.
+                CLEAR gw_cus.
+                gw_cus-sign = gc_i.
+                gw_cus-option = gc_eq.
+                gw_cus-low = <lfs_field>.
+                APPEND gw_cus TO gr_cus.
+              ENDIF.
+              UNASSIGN <lfs_field>.
+              ASSIGN COMPONENT gv_fn_sp OF STRUCTURE <gfs_cvc> TO <lfs_field>.
+              IF <lfs_field> IS ASSIGNED.
+                CLEAR gw_shptp.
+                gw_shptp-sign = gc_i.
+                gw_shptp-option = gc_eq.
+                gw_shptp-low = <lfs_field>.
+                APPEND gw_shptp TO gr_shptp.
+              ENDIF.
+            WHEN 'R_DISTRICT-DISTRICT'.
+              ASSIGN COMPONENT gv_fn_sp OF STRUCTURE <gfs_cvc> TO <lfs_field>.
+              IF <lfs_field> IS ASSIGNED.
+                APPEND INITIAL LINE TO gt_rfc_opt ASSIGNING <lfs_opt>.
+                IF <lfs_opt> IS ASSIGNED.
+                  CONCATENATE 'KUNNR = ''' <lfs_field> ''' OR ' INTO <lfs_opt>.
+                ENDIF.
+              ENDIF.
+          ENDCASE.
+          UNASSIGN <lfs_kunnr>.
+          APPEND INITIAL LINE TO gt_kunnr ASSIGNING <lfs_kunnr>.
+          IF <lfs_kunnr> IS ASSIGNED .
+            <lfs_kunnr>-kunnr = <gfs_cvc>-p_eccshp.
+          ENDIF.
+          <gfs_cvc>-plobj = <lfs_plob>-plobj.
+        ENDIF.
+      ENDAT.
+    ENDLOOP.
+
+    CASE me->gv_rule_name.
+      WHEN 'PRDGRP-PSKU_PRDGRP'.
+        lt_cvc = gt_cvc.
+        SORT lt_cvc BY matnr.
+        DELETE ADJACENT DUPLICATES FROM lt_cvc COMPARING matnr.
+        IF lt_cvc IS NOT INITIAL.
+          SELECT matid matnr matkl
+            FROM /sapapo/matkey
+            INTO TABLE gt_matkey
+            FOR ALL ENTRIES IN lt_cvc
+            WHERE matnr = lt_cvc-matnr.
+          IF sy-subrc = 0.
+            SORT gt_matkey BY matnr.
+          ENDIF.
+        ENDIF.
+      WHEN 'GC-GRPCUS'.
+*    fetching customer data from ECC system
+        CALL FUNCTION 'Z_APO_EXP_REP' DESTINATION gw_rfc-rfcdest
+          EXPORTING
+            gt_kunnr = gt_kunnr
+          IMPORTING
+            gt_kna1  = gt_kna1
+            gt_tknvv = gt_knvv
+            gt_tknvp = gt_knvp
+            lt_knvp2 = gt_knvp2.
+
+        SORT gt_knvp BY vkorg vtweg spart kunn2.
+        SORT gt_knvp2 BY kunnr vkorg vtweg spart.
+
+      WHEN 'PLANSHPPOLY-C_CLASS' OR 'R_STATE-STATE' OR 'R_STATE-STATE_IN'.
+        SELECT locid locno adrnummer region
+         FROM /sapapo/loc AS l
+         INNER JOIN adrc AS a
+           ON l~adrnummer = a~addrnumber
+         INTO TABLE gt_location
+         WHERE locno IN gr_shptp.
+        IF sy-subrc = 0.
+          SORT gt_location BY locno.
+        ENDIF.
+      WHEN 'R_REGION-REGION'.
+        SELECT /bic/r_cus /bic/r_region /bic/r_state
+          FROM /bic/pr_cus
+          INTO TABLE gt_cust
+          WHERE /bic/r_cus IN gr_cus.
+        IF sy-subrc = 0.
+          SORT gt_cust BY r_cus r_state.
+        ENDIF.
+      WHEN 'R_DISTRICT-DISTRICT'.
+        UNASSIGN <lfs_rfc_field>.
+        APPEND INITIAL LINE TO gt_rfc_fields ASSIGNING <lfs_rfc_field>.
+        IF <lfs_rfc_field> IS ASSIGNED.
+          <lfs_rfc_field>-fieldname = gc_fn_kunnr.
+        ENDIF.
+        UNASSIGN <lfs_rfc_field>.
+        APPEND INITIAL LINE TO gt_rfc_fields ASSIGNING <lfs_rfc_field>.
+        IF <lfs_rfc_field> IS ASSIGNED.
+          <lfs_rfc_field>-fieldname = gc_fn_region.
+        ENDIF.
+        UNASSIGN <lfs_rfc_field>.
+        APPEND INITIAL LINE TO gt_rfc_fields ASSIGNING <lfs_rfc_field>.
+        IF <lfs_rfc_field> IS ASSIGNED.
+          <lfs_rfc_field>-fieldname = gc_fn_counc.
+        ENDIF.
+        DESCRIBE TABLE gt_rfc_opt LINES lv_nrecords.
+        READ TABLE gt_rfc_opt ASSIGNING <lfs_rfc_opt> INDEX lv_nrecords.
+        IF sy-subrc = 0 AND <lfs_rfc_opt> IS ASSIGNED.
+          SPLIT <lfs_rfc_opt>-text AT 'OR' INTO <lfs_rfc_opt>-text lv_tmp_str.
+        ENDIF.
+        CALL FUNCTION 'RFC_READ_TABLE' DESTINATION gw_rfc-rfcdest
+          EXPORTING
+            query_table          = 'KNA1'
+          TABLES
+            options              = gt_rfc_opt
+            fields               = gt_rfc_fields
+            data                 = gt_rfc_data
+          EXCEPTIONS
+            table_not_available  = 1
+            table_without_data   = 2
+            option_not_valid     = 3
+            field_not_valid      = 4
+            not_authorized       = 5
+            data_buffer_exceeded = 6
+            OTHERS               = 7.
+        IF sy-subrc <> 0.
+* Implement suitable error handling here
+        ENDIF.
+        gt_customer_addr = gt_rfc_data.
+        SORT gt_customer_addr BY kunnr.
+      WHEN 'SKU-AAG'. "added by KPIT_090, TR- AD1K909543
+        lt_cvc = gt_cvc.
+*        SORT lt_cvc BY matnr."commented by Hiral on 28.07.2022
+        " DELETE ADJACENT DUPLICATES FROM lt_cvc COMPARING matnr."commented by Hiral on 28.07.2022
+        SORT lt_cvc BY 9amatnr.""added on 28.07.2022 (HIRAL)
+        DELETE ADJACENT DUPLICATES FROM lt_cvc COMPARING 9amatnr."added on 28.07.2022 (HIRAL)
+        IF lt_cvc IS NOT INITIAL.
+          SELECT matnr locno matid locid at103
+            FROM /sapapo/v_matloc
+            INTO TABLE gt_matloc
+            FOR ALL ENTRIES IN lt_cvc
+            WHERE matnr = lt_cvc-9amatnr"lt_cvc-matnr Hiral 28.07.2022
+            AND loctype = '1001'  AND
+                  at103 = gc_at103_pc AND
+                  ( beskz = gc_e OR beskz = gc_x ) AND          "Added by P10045682, TR- AD1K913851, On 10.07.2020
+                  lvorm = abap_false. "added by KPIT_090, TR- AD1K909893
+          IF sy-subrc = 0.
+            DELETE gt_matloc WHERE at103 IS INITIAL.
+            SORT gt_matloc BY matnr.
+          ENDIF.
+
+**********************************************************************
+*    BOC  : KPIT_090
+*    Date : 12/05/2018
+*    TR   : AD1K909893
+*    Description: ND PC Enhancement
+**********************************************************************
+          SELECT matid matnr matkl
+            FROM /sapapo/matkey
+            INTO TABLE gt_matkey
+            FOR ALL ENTRIES IN lt_cvc
+            WHERE matnr = lt_cvc-9amatnr AND lvorm = abap_true. "lt_cvc-matnr "Hiral 28.07.2022
+          IF sy-subrc = 0.
+            SORT gt_matkey BY matnr.
+          ENDIF.
+**********************************************************************
+*    EOC: KPIT_090
+**********************************************************************
+
+        ENDIF.
+
+
+        WHEN'SKU-AAG_POLY'.
+
+        lt_cvc = gt_cvc.
+*        SORT lt_cvc BY matnr. "commented by hiral on 28.07.2022
+*        DELETE ADJACENT DUPLICATES FROM lt_cvc COMPARING matnr.""commented by hiral on 28.07.2022
+
+        SORT lt_cvc BY 9amatnr. "Added by hiral on 28.07.2022
+        DELETE ADJACENT DUPLICATES FROM lt_cvc COMPARING 9amatnr."Added by hiral on 28.07.2022
+
+*BOC by naveen on 19-05-2020
+        IF lt_cvc IS NOT INITIAL.
+          SELECT * FROM zapo_pc_mrp INTO TABLE gt_mrp FOR ALL ENTRIES IN lt_cvc
+            WHERE
+                  "matnr = lt_cvc-matnr."commented by Hiral on 28.07.2022
+                  matnr = lt_cvc-9amatnr.
+          IF sy-subrc = 0.
+            SORT gt_mrp BY matnr ." zapoloc.
+          ENDIF.
+        ENDIF.
+*EOC by naveen on 19-05-2020
+
+
+      WHEN 'SEG-SEG'.
+        CLEAR gr_salesorg.
+        lt_cvc = gt_cvc.
+        SORT lt_cvc BY p_saleorg.
+        DELETE ADJACENT DUPLICATES FROM lt_cvc COMPARING p_saleorg.
+        UNASSIGN <lfs_cvc>.
+        LOOP AT lt_cvc ASSIGNING <lfs_cvc>.
+          UNASSIGN <lfs_saleorg>.
+          APPEND INITIAL LINE TO gr_salesorg ASSIGNING <lfs_saleorg>.
+          IF <lfs_saleorg> IS ASSIGNED.
+            <lfs_saleorg>-sign    = gc_i.
+            <lfs_saleorg>-option  = gc_eq.
+            <lfs_saleorg>-low     = <lfs_cvc>-p_saleorg+6(4).
+          ENDIF.
+        ENDLOOP.
+
+        lt_cvc = gt_cvc.
+        SORT lt_cvc BY p_div p_grpcust.
+        DELETE ADJACENT DUPLICATES FROM lt_cvc COMPARING p_div p_grpcust.
+        IF lt_cvc IS NOT INITIAL.
+*          fetching segment information
+          SELECT division vkorg grpcust segment
+            FROM zapo_cust_seg
+            INTO TABLE gt_cust_seg
+            FOR ALL ENTRIES IN lt_cvc
+            WHERE division = lt_cvc-p_div AND vkorg IN gr_salesorg AND
+                  grpcust =  lt_cvc-p_grpcust .
+          IF sy-subrc = 0.
+            SORT gt_cust_seg BY division vkorg grpcust.
+          ENDIF.
+        ENDIF.
+      WHEN 'ECCSHP-AAG_MATDEL'.
+
+        LOOP AT gt_cvc ASSIGNING <lfs_cvc>.
+          gw_matnr-matnr = <lfs_cvc>-9amatnr.
+          APPEND gw_matnr TO gt_matnr_rule.
+          CLEAR gw_matnr.
+        ENDLOOP.
+
+        CALL FUNCTION 'Z_APO_CVC_MATDEL_RULE' DESTINATION gw_rfc-rfcdest
+          CHANGING
+            ct_matnr_rule = gt_matnr_rule.
+      WHEN 'ECCSHP-AAG_CSTBLCK'.
+        LOOP AT gt_cvc ASSIGNING <lfs_cvc>.
+          gw_custblk_rule-kunnr = <lfs_cvc>-p_eccshp.
+          gw_custblk_rule-spart = <lfs_cvc>-p_div.
+          gw_custblk_rule-vtweg = <lfs_cvc>-p_dc.
+          CLEAR lv_saleorg.
+          CALL FUNCTION 'CONVERSION_EXIT_ALPHA_OUTPUT'
+            EXPORTING
+              input  = <lfs_cvc>-p_saleorg
+            IMPORTING
+              output = lv_saleorg.
+          gw_custblk_rule-vkorg = lv_saleorg.
+          APPEND gw_custblk_rule TO gt_custblk_rule.
+          CLEAR gw_custblk_rule.
+        ENDLOOP.
+
+        CALL FUNCTION 'Z_APO_CVC_CUSTBLK_RULE' DESTINATION gw_rfc-rfcdest
+          IMPORTING
+            et_knvp       = gt_custblk_bp
+            et_knvp_payer = gt_custblk_payer
+          CHANGING
+            ct_custblk    = gt_custblk_rule.
+
+** BOC By Chiranjeevi
+      WHEN 'ECCSHP-AAG_ECCMRP'.
+
+** EOC By Chiranjeevi
+
+*      boc by madhvi
+      WHEN 'MATCLASS-AAG'.
+        lt_cvc = gt_cvc.
+        SORT lt_cvc BY p_div 9amatnr.
+        DELETE ADJACENT DUPLICATES FROM lt_cvc COMPARING  p_div 9amatnr.
+
+        SELECT param1 param2 param3 param4 param5 FROM zapoparam
+          INTO TABLE lt_apoparam
+        WHERE param1 = p_mod
+          AND param2 = 'ZAPO_CVCREALIGN'
+          AND param3 = p_bsggrp
+          AND param4 = 'RULE'
+          AND value1 = 'MATCLASS'.
+
+        IF sy-subrc = 0 AND NOT lt_apoparam IS INITIAL.
+          READ TABLE lt_apoparam INTO lw_apoparam INDEX 1.
+        ENDIF.
+        IF NOT lw_apoparam IS INITIAL.
+          IF lt_cvc IS NOT INITIAL.
+            SELECT zpdi zgrade zplnstat FROM zapo_pc_matclass
+              INTO TABLE gt_mat_class
+              FOR ALL ENTRIES IN lt_cvc
+              WHERE zpdi = lt_cvc-p_div AND zgrade = lt_cvc-9amatnr AND zplnstat = lw_apoparam-param5 .
+
+            IF sy-subrc = 0.
+              SORT gt_mat_class BY zpdi zgrade.
+            ENDIF.
+          ENDIF.
+        ENDIF.
+*eoc by madhvi
+    ENDCASE.
+  ENDMETHOD.                    "fetch_cvc
+
+  "! This method fetches the Global constants maintained in ZAPOPARAM table
+  METHOD fetch_param.
+    SELECT *
+      FROM zapoparam
+      INTO TABLE gt_zapoparam
+      WHERE param2 = 'ZAPO_CVCREALIGN'.
+    IF sy-subrc IS NOT INITIAL.
+      MESSAGE 'Please maintain entries in ZAPOPARAM Table'(006) TYPE gc_e.
+    ENDIF.
+  ENDMETHOD.                    "fetch_param
+
+  "! This method fetches the data required for comparision with
+  "! CVC data
+  METHOD fetch_realign_data.
+    DATA:
+      lt_pcexcus TYPE STANDARD TABLE OF gty_excus,
+      lt_zapoparam TYPE STANDARD TABLE OF zapoparam,
+      s_usrrole TYPE RANGE OF agr_name,
+      lw_usrrole LIKE LINE OF s_usrrole.
+
+    FIELD-SYMBOLS:
+      <lfs_pcexcus> TYPE gty_excus,
+      <lfs_zapoparam> TYPE zapoparam,
+      <lfs_pcexcus_new> TYPE gty_excus,
+      <lfs_selection> TYPE /sapapo/ts_iobj_selection,
+      <lfs_div> TYPE  gty_zbgdiv.
+
+    gt_div = gt_zbgdiv.
+    DELETE gt_div WHERE bsg <> p_bsggrp.
+
+    LOOP AT gt_div ASSIGNING <lfs_div>.
+      UNASSIGN <lfs_selection>.
+      APPEND INITIAL LINE TO gt_sel_div ASSIGNING <lfs_selection>.
+      IF <lfs_selection> IS ASSIGNED.
+        <lfs_selection>-iobjnm = gc_fn_p_div.
+        <lfs_selection>-sign = gc_i.
+        <lfs_selection>-option = gc_eq.
+        <lfs_selection>-low = <lfs_div>-div.
+      ENDIF.
+    ENDLOOP.
+*    for 9alocno validation
+    SELECT cp1_zcountry zregion zsubzone
+      FROM zapo_pc_excus
+      INTO TABLE lt_pcexcus.
+    IF sy-subrc = 0.
+      LOOP AT lt_pcexcus ASSIGNING <lfs_pcexcus>.
+        APPEND INITIAL LINE TO gt_pcexcus ASSIGNING <lfs_pcexcus_new>.
+        IF <lfs_pcexcus_new> IS ASSIGNED.
+          <lfs_pcexcus_new> = <lfs_pcexcus>.
+          CONCATENATE <lfs_pcexcus_new>-zregion '_EX' INTO <lfs_pcexcus_new>-zregion.
+        ENDIF.
+      ENDLOOP.
+      SORT gt_pcexcus BY cp1_zcountry.
+    ENDIF.
+
+    SELECT zpdi zgrpcust zpshp zdefclass zplnclass zdefdepo
+      FROM zapo_pc_cusclass
+      INTO TABLE gt_pccuscls
+      FOR ALL ENTRIES IN gt_div
+      WHERE zpdi = gt_div-div.
+    IF sy-subrc = 0.
+      SORT gt_pccuscls BY zpdi zgrpcust zpshp.
+    ENDIF.
+
+    SELECT zpdi zgrade zoffsper
+      FROM zapo_pc_matclass
+      INTO TABLE gt_matcls
+      FOR ALL ENTRIES IN gt_div
+      WHERE zpdi = gt_div-div.
+    IF sy-subrc = 0.
+      SORT gt_matcls BY zpdi zgrade.
+    ENDIF.
+
+    SELECT zpdi zagent zpaposhp zprodgrp zteritory p_reg_off created_on " CREATED_ON added by KPIT_095 TR: AD1K912123
+      FROM zapo_pc_tercust
+      INTO TABLE gt_tercust
+      FOR ALL ENTRIES IN gt_div
+      WHERE zpdi = gt_div-div.
+    IF sy-subrc = 0.
+*      SORT gt_tercust BY zpdi zagent zpaposhp zprodgrp.
+      SORT gt_tercust BY zpdi zagent zpaposhp zprodgrp ASCENDING created_on DESCENDING.
+
+    ENDIF.
+
+*    getting the RFC destination details
+    CALL FUNCTION 'ZAPO_GET_RFC'
+      EXPORTING
+        iv_system             = 'ECC'
+      TABLES
+        t_rfc                 = gt_rfc
+      EXCEPTIONS
+        rfc_dest_not_found    = 1
+        invalid_param         = 2
+        no_data_found         = 3
+        own_logical_not_found = 4
+        OTHERS                = 5.
+    IF sy-subrc = 0.
+      READ TABLE gt_rfc INTO gw_rfc INDEX 1.
+    ENDIF.
+
+    lt_zapoparam  = gt_zapoparam.
+    DELETE lt_zapoparam WHERE param3 <> gc_param3_mail OR param4 <> p_bsggrp.
+
+*    getting user role(s) of the selected Business group
+    UNASSIGN <lfs_zapoparam>.
+    LOOP AT lt_zapoparam ASSIGNING <lfs_zapoparam>.
+      CLEAR lw_usrrole.
+      lw_usrrole-sign = gc_i.
+      lw_usrrole-option = gc_eq.
+      lw_usrrole-low = <lfs_zapoparam>-value1.
+      APPEND lw_usrrole TO s_usrrole.
+    ENDLOOP.
+    IF sy-subrc IS NOT INITIAL.
+      MESSAGE 'Please maintain User Role'(007) TYPE gc_suc DISPLAY LIKE gc_info.
+    ENDIF.
+
+*    fetching email of receipients
+    SELECT au~agr_name au~uname a6~smtp_addr
+      FROM agr_users AS au
+      INNER JOIN usr02 AS u2
+        ON u2~bname = au~uname
+      INNER JOIN usr21 AS u21
+        ON u2~bname = u21~bname
+      INNER JOIN adr6 AS a6
+        ON a6~addrnumber = u21~addrnumber AND a6~persnumber = u21~persnumber
+      INTO TABLE gt_recipents
+      WHERE agr_name IN s_usrrole.
+    IF sy-subrc <> 0.
+      MESSAGE 'Please maintain Email for users'(008) TYPE gc_suc DISPLAY LIKE gc_info.
+    ELSE.
+      SORT gt_recipents BY uname.
+      DELETE ADJACENT DUPLICATES FROM gt_recipents COMPARING uname.
+    ENDIF.
+  ENDMETHOD.                    "fetch_realign_data
+
+  "! This method gets the Authorization object details
+  "! @param iv_auth_object            | Authorization Object Name
+  METHOD get_auth.
+    CLEAR gt_auth_values.
+    CALL FUNCTION 'SUSR_USER_AUTH_FOR_OBJ_GET'
+      EXPORTING
+        new_buffering       = '3'
+        mandant             = sy-mandt
+        user_name           = sy-uname
+        sel_object          = iv_auth_object
+      TABLES
+        values              = gt_auth_values
+      EXCEPTIONS
+        user_name_not_exist = 1
+        not_authorized      = 2
+        internal_error      = 3
+        OTHERS              = 4.
+    IF sy-subrc <> 0.
+      MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
+        WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+    ENDIF.
+    IF gt_auth_values IS NOT INITIAL.
+      SORT gt_auth_values BY objct field von.
+    ENDIF.
+  ENDMETHOD.                    "get_auth_values
+
+  "! This method fill the P_BSGGRP drop down with values
+  METHOD init_bg.
+    DATA:
+      lt_zbgdiv TYPE STANDARD TABLE OF gty_zbgdiv.
+    FIELD-SYMBOLS:
+      <lfs_zbgdiv> TYPE gty_zbgdiv.
+
+*    fetching the allowed division for logged in user
+    me->get_auth( iv_auth_object = 'ZBGDIV' ).
+    DELETE gt_auth_values WHERE field <> 'DIV'.
+
+    UNASSIGN <lfs_zbgdiv>.
+    LOOP AT gt_auth_values ASSIGNING <gfs_auth_values>.
+      CLEAR me->gw_div.
+      me->gw_div-sign = gc_i.
+      me->gw_div-option = gc_eq.
+      me->gw_div-low = <gfs_auth_values>-von.
+      APPEND me->gw_div TO me->gr_div.
+    ENDLOOP.
+    IF sy-subrc <> 0.
+      MESSAGE 'Please Maintain Division for the Business Group'(009) TYPE gc_e.
+    ENDIF.
+*    fetching the bussiness group for selected division
+    SELECT bsg div
+      FROM zbg_div
+      INTO TABLE gt_zbgdiv
+      WHERE div IN me->gr_div.
+    IF sy-subrc = 0.
+      lt_zbgdiv = gt_zbgdiv.
+      SORT lt_zbgdiv BY bsg.
+      DELETE ADJACENT DUPLICATES FROM lt_zbgdiv COMPARING bsg.
+
+      CLEAR gt_list.
+*      populating the the business field
+      UNASSIGN <lfs_zbgdiv>.
+      LOOP AT lt_zbgdiv ASSIGNING <lfs_zbgdiv>.
+        AT FIRST.
+          p_bsggrp = <lfs_zbgdiv>-bsg.
+        ENDAT.
+        UNASSIGN <gfs_list>.
+        APPEND INITIAL LINE TO gt_list ASSIGNING <gfs_list>.
+        IF <gfs_list> IS ASSIGNED.
+          <gfs_list>-key = <lfs_zbgdiv>-bsg.
+          UNASSIGN <gfs_zapoparam>.
+          READ TABLE gt_zapoparam ASSIGNING <gfs_zapoparam>
+            WITH KEY param3 = gc_param3_mpos param4 = <lfs_zbgdiv>-bsg.
+          IF sy-subrc = 0 AND <gfs_zapoparam> IS ASSIGNED.
+            <gfs_list>-text = <gfs_zapoparam>-remarks.
+          ELSE.
+            <gfs_list>-text = <lfs_zbgdiv>-bsg.
+          ENDIF.
+        ENDIF.
+      ENDLOOP.
+
+      SORT gt_list BY text.
+*      setting the business group in list box
+      CALL FUNCTION 'VRM_SET_VALUES'
+        EXPORTING
+          id              = 'P_BSGGRP'
+          values          = gt_list
+        EXCEPTIONS
+          id_illegal_name = 1
+          OTHERS          = 2.
+      IF sy-subrc = 0.
+* Implement suitable er ror handling here
+        CLEAR : p_bsggrp.
+      ENDIF.
+    ENDIF.
+  ENDMETHOD.                    "init_bg
+
+  "! This method fill the P_MOD drop down with values
+  METHOD init_module.
+    DATA:
+      lt_zapoparam TYPE STANDARD TABLE OF zapoparam.
+
+    lt_zapoparam = gt_zapoparam.
+    DELETE lt_zapoparam WHERE param3 <> 'MODULE'.
+
+    CLEAR gt_list.
+    UNASSIGN <gfs_zapoparam>.
+    LOOP AT lt_zapoparam ASSIGNING <gfs_zapoparam>.
+      AT FIRST.
+        p_mod = <gfs_zapoparam>-param1.
+      ENDAT.
+      UNASSIGN <gfs_list>.
+      APPEND INITIAL LINE TO gt_list ASSIGNING <gfs_list>.
+      IF <gfs_list> IS ASSIGNED.
+        <gfs_list>-key = <gfs_zapoparam>-param1.
+        <gfs_list>-text = <gfs_zapoparam>-param1.
+      ENDIF.
+    ENDLOOP.
+
+    SORT gt_list BY text.
+
+    CALL FUNCTION 'VRM_SET_VALUES'
+      EXPORTING
+        id              = 'P_MOD'
+        values          = gt_list
+      EXCEPTIONS
+        id_illegal_name = 1
+        OTHERS          = 2.
+    IF sy-subrc <> 0.
+* Implement suitable error handling here
+    ENDIF.
+
+  ENDMETHOD.                    "init_module
+
+  "! An utility method to populate the GT_SEL_FRM &
+  "! GT_SEL_TO table for saving realignment data
+  METHOD populate_info_obj.
+    FIELD-SYMBOLS:
+      <lfs_sel> TYPE /sapapo/ts_iobjnm_sel_str.
+    UNASSIGN <lfs_sel>.
+    APPEND INITIAL LINE TO gt_sel_from ASSIGNING <lfs_sel>.
+    IF <lfs_sel> IS ASSIGNED.
+      <lfs_sel>-iobjnm = iv_fieldname.
+      <lfs_sel>-value = iv_val_frm.
+    ENDIF.
+    UNASSIGN <lfs_sel>.
+    APPEND INITIAL LINE TO gt_sel_to ASSIGNING <lfs_sel>.
+    IF <lfs_sel> IS ASSIGNED.
+      <lfs_sel>-iobjnm = iv_fieldname.
+      <lfs_sel>-value = iv_val_to.
+    ENDIF.
+  ENDMETHOD.                    "populate_realign_data
+
+  "! This method is used to post Realign the data to its respective
+  "! realignment table
+  METHOD post_realign_data.
+
+    DATA:
+      lv_err_desc TYPE string.
+
+    FIELD-SYMBOLS:
+      <lfs_zapoparam> TYPE zapoparam.
+
+    CLEAR lv_err_desc.
+    IF gt_sel_from IS NOT INITIAL AND gt_sel_to IS NOT INITIAL.
+*      posting realignment data
+      IF gt_sel_from NE gt_sel_to.
+        CALL FUNCTION '/SAPAPO/TS_RLG_STEP_CREATE'
+          EXPORTING
+            iv_bas_plobid           = gv_plobid
+            iv_status               = gc_stat_spc
+            it_sel_from             = gt_sel_from
+            it_sel_to               = gt_sel_to
+            iv_validity             = sy-datum
+            iv_prop                 = gc_prop_100
+            iv_del_source           = abap_true
+            iv_logic                = gc_logic_a
+          EXCEPTIONS
+            no_permission           = 1
+            info_object_invalid     = 2
+            proportion_invalid      = 3
+            plobid_invalid          = 4
+            infoprov_invalid        = 5
+            rlgtab_name_not_created = 6
+            found_but_not_created   = 7
+            invalid_selection       = 8
+            error                   = 9
+            OTHERS                  = 10.
+        IF sy-subrc <> 0.
+
+          CASE sy-subrc.
+            WHEN 1.
+              lv_err_desc = 'No Permission'(032).
+            WHEN 2.
+              lv_err_desc = 'Info Object Invalid'(033).
+            WHEN 3.
+              lv_err_desc = 'Proportion Invalid'(034).
+            WHEN 4.
+              lv_err_desc = 'Plobid Invalid'(035).
+            WHEN 5.
+              lv_err_desc = 'Infoprov Invalid'(036).
+            WHEN 6.
+              lv_err_desc = 'Rlgtab Name Not Created'(037).
+            WHEN 7.
+              lv_err_desc = 'Found But Not Created'(038).
+            WHEN 8.
+              lv_err_desc = 'Invalid Selection'(039).
+            WHEN 9.
+              lv_err_desc = 'Error'(040).
+            WHEN 10.
+              lv_err_desc = 'Others'(041).
+          ENDCASE.
+
+          me->append_log(
+            EXPORTING
+              iv_status      = 'Error'(010)
+              iv_err_desc    = lv_err_desc
+          ).
+          UNASSIGN <lfs_zapoparam>.
+          LOOP AT gt_zapoparam_rule ASSIGNING <lfs_zapoparam> WHERE active_flag = abap_true.
+            IF me->gv_rule_name CS <lfs_zapoparam>-value1 AND me->gv_rule_name CS <lfs_zapoparam>-value2. "added by KPIT_090, TR- AD1K909543
+              CONTINUE.
+            ENDIF.
+            CONCATENATE <lfs_zapoparam>-value1 <lfs_zapoparam>-value2 INTO me->gv_rule_name SEPARATED BY gc_sprtr.
+            me->append_log(
+              EXPORTING
+                iv_status      = 'Pending'(011)
+            ).
+          ENDLOOP.
+          gv_flg_err = abap_true.
+        ENDIF.
+      ENDIF.
+    ENDIF.
+
+
+
+
+
+  ENDMETHOD.                    "post_realign_data
+
+  "! This method Realigns the CVC data
+  METHOD realign.
+
+    DATA:
+      lv_loghandle TYPE /sapapo/log_guid,
+      lt_rlgn_stat TYPE TABLE OF /sapapo/ts_rlg_step,
+      lv_err_desc  TYPE string.
+
+    FIELD-SYMBOLS:
+      <lfs_zapoparam> TYPE zapoparam.
+
+    CLEAR lv_err_desc.
+
+    SELECT step_id
+          FROM (gv_tabname)
+          INTO TABLE lt_rlgn_stat
+          WHERE state = abap_false.
+    IF sy-subrc = 0.
+*    doing realignment for the selected business
+      CALL FUNCTION '/SAPAPO/TS_RLG_DATA'
+        EXPORTING
+          iv_bas_plobid          = gv_plobid
+          iv_validity            = sy-datum
+          iv_only_infocube       = abap_false
+        IMPORTING
+          ev_log_handle          = lv_loghandle
+        EXCEPTIONS
+          no_permission          = 1
+          no_infocube_info       = 2
+          no_read_steps          = 3
+          locking_problems       = 4
+          time_series_problems   = 5
+          infocube_problems      = 6
+          rlg_status_not_updated = 7
+          no_commit              = 8
+          unlocking_problems     = 9
+          invalid_input          = 10
+          OTHERS                 = 11.
+      IF sy-subrc <> 0.
+        gv_flg_norlgn = abap_true.
+        gv_flg_err = abap_true.
+
+        CASE sy-subrc.
+          WHEN 1.
+            lv_err_desc = 'No Permission'(032).
+          WHEN 2.
+            lv_err_desc = 'Info Object Invalid'(033).
+          WHEN 3.
+            lv_err_desc = 'Proportion Invalid'(034).
+          WHEN 4.
+            lv_err_desc = 'Plobid Invalid'(035).
+          WHEN 5.
+            lv_err_desc = 'Infoprov Invalid'(036).
+          WHEN 6.
+            lv_err_desc = 'Rlgtab Name Not Created'(037).
+          WHEN 7.
+            lv_err_desc = 'Found But Not Created'(038).
+          WHEN 8.
+            lv_err_desc = 'Invalid Selection'(039).
+          WHEN 9.
+            lv_err_desc = 'Error'(040).
+          WHEN 10.
+            lv_err_desc = 'Others'(041).
+        ENDCASE.
+
+        me->append_log(
+          EXPORTING
+            iv_status      = 'ERROR'(010)
+            iv_err_desc    = lv_err_desc
+        ).
+        LOOP AT gt_zapoparam_rule ASSIGNING <lfs_zapoparam> WHERE active_flag = abap_true.
+          CONCATENATE <lfs_zapoparam>-value1 <lfs_zapoparam>-value2 INTO me->gv_rule_name SEPARATED BY gc_sprtr.
+          me->append_log(
+            EXPORTING
+              iv_status      = 'PENDING'(011)
+          ).
+        ENDLOOP.
+        gv_flg_err = abap_true.
+      ELSE.
+
+        gv_flg_norlgn = abap_true.
+        me->append_log(
+          EXPORTING
+            iv_status      = 'COMPLETED'(012)
+        ).
+      ENDIF.
+    ENDIF.
+  ENDMETHOD.                    "realign
+  METHOD execution.
+    IF p_exec IS NOT INITIAL.
+
+      DATA : lr_rule  TYPE RANGE OF char30,
+             lw_rule  LIKE LINE OF lr_rule,
+             lt_final TYPE STANDARD TABLE OF gty_final,
+             lw_final TYPE gty_final.
+      FIELD-SYMBOLS : <lfs_final> TYPE gty_final,
+                      <lfs_final_tmp> TYPE gty_final.
+
+      DATA : lv_sel_f TYPE /sapapo/chavl,
+             lv_sel_t TYPE /sapapo/chavl,
+             lv_tmp   TYPE /bic/oip_saleorg.
+
+      lw_rule-sign   = 'I'.
+      lw_rule-option = 'EQ'.
+      lw_rule-low    = 'SKU-AAG'.
+      APPEND lw_rule TO lr_rule.
+      CLEAR lw_rule-low.
+      lw_rule-low = 'SKU-AAG_POLY'.
+      APPEND lw_rule TO lr_rule.
+      CLEAR lw_rule-low.
+      lw_rule-low = 'ECCSHP-AAG_MATDEL'.
+      APPEND lw_rule TO lr_rule.
+      CLEAR lw_rule-low.
+      lw_rule-low = 'ECCSHP-AAG_CSTBLCK'.
+      APPEND lw_rule TO lr_rule.
+      CLEAR lw_rule-low.
+      lw_rule-low = 'ECCSHP-AAG_PYBLPT'.
+      APPEND lw_rule TO lr_rule.
+      CLEAR lw_rule-low.
+**      BOC BY MADHVI
+      lw_rule-low = 'SALES_HISTORY-AAG'.
+      APPEND lw_rule TO lr_rule.
+      CLEAR lw_rule-low.
+      lw_rule-low = 'MATCLASS-AAG'.
+      APPEND lw_rule TO lr_rule.
+      CLEAR lw_rule-low.
+*
+**      EOC BY MADHVI
+      REFRESH gt_final_tmp[].
+*      gt_final_tmp = gt_final.
+      gt_final_tmp = gt_final.
+      DELETE gt_final_tmp WHERE rule NOT IN lr_rule.
+      IF gt_final_tmp[] IS NOT INITIAL.
+
+*        LOOP AT gt_final_tmp ASSIGNING <lfs_final>.
+*          IF <lfs_final>-rule EQ 'SKU-AAG' OR <lfs_final>-rule EQ 'SKU-AAG_POLY'.
+*            <lfs_final>-9amatnr = <lfs_final>-matnr.
+*          ENDIF.
+*        ENDLOOP.
+        SORT gt_final_tmp BY p_saleorg p_div p_dc p_eccshp 9amatnr rule prop_val."added by hiral "uncommented prop_val by madhvi "commented 19.04.2024
+        DELETE ADJACENT DUPLICATES FROM gt_final_tmp COMPARING p_saleorg p_div p_dc p_eccshp 9amatnr rule prop_val. "uncommented prop_val by madhvi "rule cond addrd by Hitral on 11.07.2022
+        SORT gt_final BY p_saleorg p_div p_dc p_eccshp 9amatnr prop_val. " Added By Chiranjeevi "commented by madhvi "uncommented on 19.04.2024
+
+        LOOP AT gt_final_tmp ASSIGNING <lfs_final>.
+          CLEAR lw_final.
+          READ TABLE gt_final INTO lw_final WITH KEY p_saleorg   = <lfs_final>-p_saleorg
+                                                     p_div       = <lfs_final>-p_div "Changed
+                                                     p_dc        = <lfs_final>-p_dc
+                                                     p_eccshp    = <lfs_final>-p_eccshp
+                                                     9amatnr     = <lfs_final>-9amatnr
+                                                     prop_val    = 'ND' BINARY SEARCH .
+          IF sy-subrc EQ 0.
+            <lfs_final>-prop_val = 'ND'.
+            <lfs_final>-rule     = lw_final-rule.
+          ELSE.
+            <lfs_final>-prop_val = 'PC'.
+          ENDIF.
+** BOC By Chiranjeevi
+          IF <lfs_final>-prop_val NE <lfs_final>-p_aag.
+            APPEND INITIAL LINE TO lt_final ASSIGNING <lfs_final_tmp>.
+            <lfs_final_tmp> = <lfs_final>.
+          ENDIF.
+** EOC By Chiranjeevi
+        ENDLOOP.
+*        DELETE gt_final WHERE rule IN lr_rule.
+      ENDIF.
+** BOC By Chiranjeevi
+*      IF gt_final_tmp[] IS NOT INITIAL.
+*        LOOP AT gt_final_tmp INTO lw_final.
+*          IF lw_final-prop_val NE lw_final-p_aag.
+*            APPEND lw_final TO lt_final.
+*            CLEAR lw_final.
+*          ENDIF.
+*        ENDLOOP.
+*      ENDIF.
+*      IF gt_final_new IS NOT INITIAL.
+*        APPEND LINES OF gt_final_new TO gt_final.
+*      ENDIF.
+** EOC By Chiranjeevi
+
+      IF lt_final IS NOT INITIAL.
+        DELETE ADJACENT DUPLICATES FROM lt_final COMPARING  prop_val 0chngid 9alocno 9amatnr p_aag p_agent p_country
+                                                                 p_dc p_div p_eccshp p_grpcust p_planshp p_prodgrp p_reg_off p_saleorg
+                                                                 p_sku p_sku_fbr p_sku_pfy p_sku_pty p_tertory p_segment matnr r_state r_dist_af
+                                                                 r_dist_lu r_dist_pr r_region r_shpto_a r_shpto_lu r_shpto_p   ."Rule
+      ENDIF.
+      LOOP AT lt_final ASSIGNING <lfs_final>.
+        REFRESH: gt_sel_from, gt_sel_to.
+        IF <lfs_final>-p_aag EQ <lfs_final>-prop_val.
+          CONTINUE.
+        ENDIF.
+
+        lv_sel_f = <lfs_final>-p_aag.
+        lv_sel_t = <lfs_final>-prop_val.
+        me->populate_info_obj(
+          EXPORTING
+            iv_fieldname = gc_fn_p_aag
+            iv_val_frm   = lv_sel_f
+            iv_val_to    = lv_sel_t
+        ).
+
+        IF <lfs_final>-p_div IS NOT INITIAL.
+          lv_sel_f = lv_sel_t = <lfs_final>-p_div.
+          me->populate_info_obj(
+            EXPORTING
+              iv_fieldname = gc_fn_p_div
+              iv_val_frm   = lv_sel_f
+              iv_val_to    = lv_sel_t
+          ).
+        ENDIF.
+        IF <lfs_final>-p_dc IS NOT INITIAL.
+          lv_sel_f = lv_sel_t = <lfs_final>-p_dc.
+          me->populate_info_obj(
+            EXPORTING
+              iv_fieldname = gc_fn_p_dc
+              iv_val_frm   = lv_sel_f
+              iv_val_to    = lv_sel_t
+          ).
+        ENDIF.
+*
+        IF <lfs_final>-p_eccshp IS NOT INITIAL.
+          lv_sel_f = lv_sel_t = <lfs_final>-p_eccshp.
+          me->populate_info_obj(
+            EXPORTING
+              iv_fieldname = gc_fn_p_eccshp
+              iv_val_frm   = lv_sel_f
+              iv_val_to    = lv_sel_t
+          ).
+
+        ENDIF.
+
+        IF <lfs_final>-p_saleorg IS NOT INITIAL.
+          CALL FUNCTION 'CONVERSION_EXIT_ALPHA_OUTPUT'
+            EXPORTING
+              input  = <gfs_cvc>-p_saleorg
+            IMPORTING
+              output = lv_tmp.
+          lv_sel_f = lv_sel_t = lv_tmp.
+          lv_sel_f = lv_sel_t = <lfs_final>-p_saleorg.
+          me->populate_info_obj(
+            EXPORTING
+              iv_fieldname = gc_fn_p_saleorg
+              iv_val_frm   = lv_sel_f
+              iv_val_to    = lv_sel_t
+          ).
+
+        ENDIF.
+        IF <lfs_final>-9amatnr IS NOT INITIAL.
+          lv_sel_f = lv_sel_t = <lfs_final>-9amatnr.
+          me->populate_info_obj(
+            EXPORTING
+              iv_fieldname = gc_fn_9amatnr
+              iv_val_frm   = lv_sel_f
+              iv_val_to    = lv_sel_t
+              ).
+        ENDIF.
+        me->post_realign_data( ).
+
+      ENDLOOP.
+    ENDIF.
+  ENDMETHOD.                    "execution
+  METHOD show_progressbar.
+    IF sy-batch = abap_false AND iv_prc MOD 20 = 0.
+      CALL FUNCTION 'SAPGUI_PROGRESS_INDICATOR'
+        EXPORTING
+          percentage = iv_prc
+          text       = iv_text.
+    ENDIF.
+  ENDMETHOD.                    "show_progressbar
+
+  "! This method is used to send mail in case of any error occur
+  METHOD send_mail.
+
+    DATA:
+      lv_mail             TYPE adr6-smtp_addr,
+      lv_subj             TYPE so_obj_des,
+      lv_tabix            TYPE sytabix,
+      lv_bsg_text         TYPE zparamvalue2,
+      lw_recipents        TYPE gty_recipents,
+      gt_lines            TYPE tline_tab,
+      gt_mail_body        TYPE soli_tab,
+      go_document         TYPE REF TO cl_document_bcs,
+      go_send_request     TYPE REF TO cl_bcs,
+      gi_recipient        TYPE REF TO if_recipient_bcs,
+      go_sender           TYPE REF TO cl_cam_address_bcs,
+      gx_bcs_exception    TYPE REF TO cx_document_bcs,
+      gx_addr_exception   TYPE REF TO cx_address_bcs,
+      gx_send_exception   TYPE REF TO cx_send_req_bcs.
+
+    FIELD-SYMBOLS:
+      <lfs_zapoparam> TYPE zapoparam,
+      <lfs_line> TYPE tline,
+      <lfs_rulelog> TYPE gty_rulelog,
+      <lfs_mail_body> TYPE soli.
+
+    IF gt_recipents IS INITIAL.
+      MESSAGE 'Mail cannot be send'(013) TYPE gc_suc DISPLAY LIKE gc_info.
+      RETURN.
+    ENDIF.
+
+    TRY.
+        CREATE OBJECT go_document.
+
+        go_send_request =  cl_bcs=>create_persistent( ).
+
+*        mail from
+        go_sender =  cl_cam_address_bcs=>create_internet_address( gc_sndr_mail ).
+
+        go_send_request->set_sender( i_sender =  go_sender ).
+
+*        setting recipents of the mail
+        LOOP AT gt_recipents INTO lw_recipents.
+          lv_mail = lw_recipents-smtp_addr.
+
+          gi_recipient = cl_cam_address_bcs=>create_internet_address( lv_mail ).
+
+          go_send_request->add_recipient(
+            EXPORTING
+              i_recipient = gi_recipient
+              i_express    = abap_true
+          ).
+
+          go_send_request->set_status_attributes( gc_req_attr_n ).
+
+        ENDLOOP.
+
+*        setting CC mail address
+        LOOP AT gt_zapoparam ASSIGNING <lfs_zapoparam> WHERE param3 = gc_param3_mail AND param4 = gc_param4_cc.
+          lv_mail = <lfs_zapoparam>-value1.
+          cl_cam_address_bcs=>create_internet_address(
+            EXPORTING
+              i_address_string = lv_mail    " Internet Mail (SMTP) Address
+            RECEIVING
+              result           =  gi_recipient   " Reference to BAS Address
+          ).
+
+          go_send_request->add_recipient(
+            EXPORTING
+              i_recipient  = gi_recipient    " Recipient of Message
+              i_copy       = abap_true    " Send Copy
+          ).
+        ENDLOOP.
+        "madhvi
+*        reading mail subject & body
+        CALL FUNCTION 'READ_TEXT'
+          EXPORTING
+            client                  = sy-mandt
+            id                      = gc_tdid_st
+            language                = sy-langu
+            name                    = 'ZAPO_CVC_MAIL_ERR_BODY'
+            object                  = gc_tdobject_text
+          TABLES
+            lines                   = gt_lines
+          EXCEPTIONS
+            id                      = 1
+            language                = 2
+            name                    = 3
+            not_found               = 4
+            object                  = 5
+            reference_check         = 6
+            wrong_access_to_archive = 7
+            OTHERS                  = 8.
+        IF sy-subrc <> 0.
+          MESSAGE ID sy-msgid TYPE gc_suc NUMBER sy-msgno
+            WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4 DISPLAY LIKE gc_e.
+          RETURN.
+        ENDIF.
+
+*        reading mail subject
+        READ TABLE gt_lines ASSIGNING <lfs_line> INDEX 1.
+        IF sy-subrc = 0.
+          lv_subj = <lfs_line>-tdline.
+          REPLACE '[BSG]' IN lv_subj WITH p_bsggrp.
+        ENDIF.
+
+*        deleting the mail subject
+        DELETE gt_lines INDEX 1.
+
+*        converting tlines to mail body
+        LOOP AT gt_lines ASSIGNING <lfs_line>.
+          lv_tabix = sy-tabix.
+          APPEND INITIAL LINE TO gt_mail_body ASSIGNING <lfs_mail_body>.
+          IF <lfs_mail_body> IS ASSIGNED.
+            CASE lv_tabix.
+              WHEN 2.
+                CONCATENATE <lfs_line>-tdline p_mod INTO <lfs_mail_body>-line SEPARATED BY space.
+              WHEN 3.
+*        reading Business group text name
+                UNASSIGN <lfs_zapoparam>.
+                READ TABLE gt_zapoparam ASSIGNING <lfs_zapoparam>
+                  WITH KEY param3 = gc_param3_mpos param4 = p_bsggrp
+                  BINARY SEARCH.
+                IF sy-subrc = 0.
+                  lv_bsg_text = <lfs_zapoparam>-remarks.
+                ELSE.
+                  lv_bsg_text = p_bsggrp.
+                ENDIF.
+
+                CONCATENATE <lfs_line>-tdline lv_bsg_text INTO <lfs_mail_body>-line SEPARATED BY space.
+              WHEN OTHERS.
+                <lfs_mail_body>-line = <lfs_line>-tdline.
+            ENDCASE.
+          ENDIF.
+          IF lv_tabix = 7.
+            LOOP AT gt_rulelog ASSIGNING <lfs_rulelog>.
+              APPEND INITIAL LINE TO gt_mail_body ASSIGNING <lfs_mail_body>.
+              IF <lfs_mail_body> IS ASSIGNED.
+                CONCATENATE gc_begin_row gc_begin_cell <lfs_rulelog>-rule gc_end_cell gc_begin_cell
+                    <lfs_rulelog>-stat gc_end_cell gc_begin_cell <lfs_rulelog>-err_desc gc_end_cell gc_end_row
+                  INTO <lfs_mail_body>-line.
+              ENDIF.
+            ENDLOOP.
+          ENDIF.
+        ENDLOOP.
+
+        "Add document
+        go_document =  cl_document_bcs=>create_document(
+                           i_type        = gc_doctype_htm
+                           i_subject     = lv_subj
+                           i_language    = sy-langu
+                           i_text        = gt_mail_body ).
+
+        CALL METHOD go_send_request->set_document( go_document ).
+
+        go_send_request->set_send_immediately( abap_true ).
+
+        CALL METHOD go_send_request->send( ).
+        IF sy-subrc EQ 0.
+          COMMIT WORK.
+          MESSAGE 'Realignment Error: Log sent through Mail'(014) TYPE gc_suc DISPLAY LIKE gc_e.
+        ENDIF.
+
+      CATCH cx_document_bcs INTO gx_bcs_exception.
+        MESSAGE 'Error in Sending Mail'(015) TYPE gc_suc DISPLAY LIKE gc_info.
+      CATCH cx_send_req_bcs INTO gx_send_exception.
+        MESSAGE 'Error in Sending Mail'(015) TYPE gc_suc DISPLAY LIKE gc_info.
+      CATCH cx_address_bcs  INTO gx_addr_exception.
+        MESSAGE 'Error in Sending Mail'(015) TYPE gc_suc DISPLAY LIKE gc_info.
+    ENDTRY.
+  ENDMETHOD.                    "send_mail
+
+  "! updating the status in the ZAPO_IBP_STATUS table
+  METHOD upd_ibp_status.
+    DATA:
+      lv_name_text TYPE ad_namtext.
+
+*    getting the full name of user
+    SELECT SINGLE name_text
+      FROM v_usr_name
+      INTO lv_name_text
+      WHERE bname = sy-uname.
+    UNASSIGN <gfs_zapoparam>.
+    READ TABLE gt_zapoparam ASSIGNING <gfs_zapoparam>
+      WITH KEY
+        param3 = gc_param3_seq param4 = p_bsggrp.
+    IF sy-subrc = 0 AND <gfs_zapoparam> IS ASSIGNED.
+      CLEAR gw_ibp_status.
+      gw_ibp_status-mandt = sy-mandt.
+      gw_ibp_status-sequence =  <gfs_zapoparam>-value1.
+      gw_ibp_status-activity = <gfs_zapoparam>-value2.
+      gw_ibp_status-business = p_bsggrp.
+      CONCATENATE sy-datum+4(2) sy-datum(4) INTO gw_ibp_status-month_b SEPARATED BY '.'.
+      gw_ibp_status-date_b = sy-datum.
+      gw_ibp_status-date_b = sy-datum.
+      gw_ibp_status-userid = sy-uname.
+      gw_ibp_status-username = lv_name_text.
+      gw_ibp_status-status = iv_stat.
+      IF gw_ibp_status-status IS INITIAL.
+*        if the status is error, then update the remarks col with the failed rule name
+        CONCATENATE 'Rule:'(023) iv_rule 'Failed to Execute'(024) INTO gw_ibp_status-remarks SEPARATED BY space.
+      ENDIF.
+      SELECT SINGLE sequence activity business month_b
+        FROM zapo_ibp_status
+        INTO CORRESPONDING FIELDS OF gw_ibp_status
+        WHERE sequence = gw_ibp_status-sequence AND activity = gw_ibp_status-activity AND
+          business = gw_ibp_status-business AND month_b = gw_ibp_status-month_b.
+      IF  sy-subrc = 0 .
+        CALL FUNCTION 'ENQUEUE_EZAPO_IBPSTAT'
+          EXPORTING
+            mode_zapo_ibp_status = 'E'
+            mandt                = sy-mandt
+            sequence             = gw_ibp_status-sequence
+            activity             = gw_ibp_status-activity
+            business             = gw_ibp_status-business
+            month_b              = gw_ibp_status-month_b
+          EXCEPTIONS
+            foreign_lock         = 1
+            system_failure       = 2
+            OTHERS               = 3.
+        IF sy-subrc <> 0.
+          MESSAGE ID sy-msgid TYPE gc_suc NUMBER sy-msgno
+            WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4
+            DISPLAY LIKE gc_e.
+          LEAVE LIST-PROCESSING.
+        ENDIF.
+        gw_ibp_status-date_b = sy-datum.
+        gw_ibp_status-date_b = sy-datum.
+        gw_ibp_status-userid = sy-uname.
+        gw_ibp_status-username = lv_name_text.
+        MODIFY zapo_ibp_status FROM gw_ibp_status.
+        CALL FUNCTION 'DEQUEUE_EZAPO_IBPSTAT'
+          EXPORTING
+            mode_zapo_ibp_status = 'E'
+            mandt                = sy-mandt
+            sequence             = gw_ibp_status-sequence
+            activity             = gw_ibp_status-activity
+            business             = gw_ibp_status-business
+            month_b              = gw_ibp_status-month_b.
+      ELSE.
+        INSERT zapo_ibp_status FROM gw_ibp_status.
+      ENDIF.
+      IF gw_ibp_status-status IS INITIAL.
+        MESSAGE 'Realignment Error: Log sent through Mail'(014) TYPE gc_suc DISPLAY LIKE gc_e.
+      ELSE.
+        IF gv_flg_norlgn = abap_false.
+          MESSAGE 'No Realignment needed, Master Data is correct'(026) TYPE gc_suc.
+        ELSE.
+          MESSAGE 'Realignment & IBP Status Updated Sucessfully'(025) TYPE gc_suc.
+        ENDIF.
+      ENDIF.
+    ELSE.
+      IF gv_flg_norlgn = abap_false.
+        MESSAGE 'No Realignment needed, Master Data is correct'(026) TYPE gc_suc.
+      ELSE.
+        MESSAGE 'Realignment & IBP Status Updated Sucessfully'(025) TYPE gc_suc.
+      ENDIF.
+    ENDIF.
+  ENDMETHOD.                    "upd_status
+
+  METHOD display_valid_grpcust.
+
+    DATA:
+      lo_display  TYPE REF TO cl_salv_display_settings,
+      lo_salv TYPE REF TO cl_salv_table,
+      lo_func TYPE REF TO cl_salv_functions_list,
+      lo_columns TYPE REF TO cl_salv_columns,
+      lv_alv_hdr  TYPE lvc_title.
+*boc by madhvi
+*    if gt_final[] is INITIAL and gt_inv_customers is INITIAL.
+*      MESSAGE 'No Proposed Value(s) Found, Master Data is correct'(021) TYPE gc_suc.
+*    endif.
+*   eoc by madhvi
+    IF gt_inv_customers IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    TRY .
+
+        cl_salv_table=>factory(
+          IMPORTING
+            r_salv_table   = lo_salv     " Basis Class Simple ALV Tables
+          CHANGING
+            t_table        = gt_inv_customers
+        ).
+
+        lo_func = lo_salv->get_functions( ).
+        lo_func->set_default( ).
+        lv_alv_hdr = 'Multiple Valid Customers List'(030).
+*       global display settings
+        lo_display = lo_salv->get_display_settings( ).
+*       activate strip pattern
+        lo_display->set_striped_pattern( abap_true ).
+        lo_display->set_list_header( lv_alv_hdr ).
+        lo_columns = lo_salv->get_columns( ).
+        lo_columns->set_optimize( ).
+
+*        IF iv_popup = abap_true.
+        lo_salv->set_screen_popup(
+          start_column = 50
+          end_column   = 115
+          start_line   = 4
+          end_line     = 16
+        ).
+*        ENDIF.
+
+        lo_salv->display( ).
+      CATCH cx_salv_msg.    " ALV: General Error Class with Message
+        MESSAGE 'Error: SALV Column'(e04) TYPE 'S' DISPLAY LIKE 'E'.
+        LEAVE LIST-PROCESSING.
+    ENDTRY.
+  ENDMETHOD.                    "display_valid_grpcust
+
+  METHOD on_user_command.
+
+    CASE e_salv_function.
+      WHEN 'GC_VAL'.
+
+        IF gt_inv_customers IS INITIAL.
+          MESSAGE 'There is no Multiple Valid customer for this Business'(029) TYPE 'S' DISPLAY LIKE 'I'.
+          RETURN.
+        ENDIF.
+
+        me->display_valid_grpcust( ).
+
+    ENDCASE.
+
+  ENDMETHOD.                    "on_user_command
+
+
+  METHOD list_of_inputs.
+    IF  ( gv_old_bg IS INITIAL OR gv_old_bg <> p_bsggrp ) AND p_bsggrp IS NOT INITIAL.
+      gv_old_bg = p_bsggrp.
+      IF p_bsggrp IS NOT INITIAL.
+        CLEAR : lt_apoparam[],gt_value[], gt_zapoparm[].
+        SELECT param1
+           param2
+           param3
+           param4
+           param5
+           value1
+           value2
+           remarks
+          FROM zapoparam INTO TABLE lt_apoparam
+          WHERE param1 = p_mod AND
+                param2 = 'ZAPO_CVCREALIGN' AND
+                param3 = p_bsggrp AND param4 = 'RULE'.
+        IF sy-subrc IS INITIAL.
+          SORT lt_apoparam BY param5.
+        ENDIF.
+
+        LOOP AT lt_apoparam ASSIGNING <lfs_apoparam>.
+          UNASSIGN <gfs_value>.
+          APPEND INITIAL LINE TO gt_value ASSIGNING <gfs_value>.
+          IF <gfs_value> IS ASSIGNED.
+            <lfs_apoparam>-rule =   <lfs_apoparam>-param4 && '-' && <lfs_apoparam>-param5 .
+            <lfs_apoparam>-rule_desc = <lfs_apoparam>-remarks.
+            TRANSLATE <lfs_apoparam>-rule TO UPPER CASE.
+            TRANSLATE <lfs_apoparam>-rule_desc TO UPPER CASE.
+            <gfs_value>-key = <lfs_apoparam>-rule.
+            <gfs_value>-text = <lfs_apoparam>-rule_desc.
+            gws_zapoparm-rule = <lfs_apoparam>-rule.
+            gws_zapoparm-remarks = <lfs_apoparam>-remarks.
+            APPEND gws_zapoparm TO gt_zapoparm.
+            CLEAR gws_zapoparm.
+          ENDIF.
+        ENDLOOP.
+        UNASSIGN <gfs_value>.
+        SORT gt_value BY key .
+        DELETE ADJACENT DUPLICATES FROM gt_value COMPARING key.
+      ENDIF.
+      IF p_rule_s IS NOT INITIAL.
+        READ TABLE gt_value WITH KEY key = p_rule_s TRANSPORTING NO FIELDS.
+        IF sy-subrc IS NOT INITIAL.
+          CLEAR p_rule_s.
+        ENDIF.
+      ENDIF.
+*    CHECK NOT gt_value[] IS INITIAL.
+*     clear : p_rule_s.
+      CALL FUNCTION 'VRM_SET_VALUES'
+        EXPORTING
+          id              = 'P_RULE_S'
+          values          = gt_value[]
+        EXCEPTIONS
+          id_illegal_name = 1
+          OTHERS          = 2.
+
+      IF sy-subrc = 0.
+*      CLEAR P_RULE_S.
+      ENDIF.
+    ENDIF.
+  ENDMETHOD.                    "LIST_OF_INPUTS
+
+
+ENDCLASS.                    "lcl_expt_rlgn IMPLEMENTATION
